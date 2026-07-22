@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting started · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html" class="active">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+      <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Getting started</h1>
+      <p class="lead">Build the binary, try the browserless mock, then drive a real browser.</p>
+
+      <h2>1. Build</h2>
+      <pre><code>cargo build --release        # runner + mock + WebDriver backends</code></pre>
+      <p>The binary lands at <code>target/release/htest</code>. Put it on your <code>PATH</code>, or run it by path.</p>
+
+      <h2>2. Try it with zero setup (mock backend)</h2>
+      <p>The default <strong>mock</strong> backend needs no browser. Use it to develop a manifest's <em>structure</em> — steps, dependencies, idempotency — before pointing at a real browser.</p>
+      <pre><code>htest graph examples/manifest.yaml     # print the run order, no execution
+htest run   examples/manifest.yaml     # run against the mock backend</code></pre>
+      <p>The mock assumes every selector exists, except those you seed absent — which lets you exercise the idempotency gate:</p>
+      <pre><code># pretend Alice's row does NOT exist yet, so create_user runs
+HTEST_MOCK_ABSENT=.row-alice htest run examples/manifest.yaml --keep-going</code></pre>
+
+      <h2>3. Drive a real browser</h2>
+      <p>htest talks to a running <strong>WebDriver server</strong>. Start one, leave it running, and point htest at it.</p>
+      <pre><code># Terminal 1 — the driver (pick one)
+geckodriver --port 4444            # Firefox
+chromedriver --port=4444           # Chrome
+
+# Terminal 2 — the run. Drop --headless to watch it.
+htest run examples/wikipedia.yaml \
+  --driver webdriver --browser firefox --headless</code></pre>
+
+      <div class="callout">
+        <strong>Which driver?</strong> Prefer <code>geckodriver</code> (Firefox) — it's largely version-independent. <code>chromedriver</code> must match your installed Chrome's major version (Chrome-for-Testing / Selenium Manager automate that). You only ever swap the <em>server</em> — never the manifests or the tool.
+      </div>
+
+      <h2>4. Write your first manifest</h2>
+      <pre><code># smoke.yaml
+vars:
+  BASE_URL: "https://example.com"
+tasks:
+  - name: homepage_loads
+    steps:
+      - goto: "{{ BASE_URL }}"
+      - wait_for: "h1"                            # wait until it renders
+      - assert: { selector: "h1", exists: true }
+      - screenshot: "home.png"</code></pre>
+      <pre><code>htest run smoke.yaml --driver webdriver --browser firefox</code></pre>
+
+      <h2>Commands</h2>
+      <pre><code>htest graph &lt;manifest&gt;... [--env FILE]     # print run graph (no browser)
+htest run   &lt;manifest&gt;... [flags]          # run one or more manifests</code></pre>
+      <p>Pass several manifests to either command — their tasks merge into a single run graph.</p>
+
+      <h3><code>run</code> flags</h3>
+      <table>
+        <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>--driver mock|webdriver</code></td><td><code>mock</code></td><td>Browser backend.</td></tr>
+          <tr><td><code>--webdriver-url &lt;url&gt;</code></td><td><code>http://localhost:4444</code></td><td>WebDriver server URL.</td></tr>
+          <tr><td><code>--browser firefox|chrome</code></td><td><code>firefox</code></td><td>Target browser (capability key).</td></tr>
+          <tr><td><code>--headless</code></td><td>off</td><td>Launch without a visible window.</td></tr>
+          <tr><td><code>--window &lt;WxH&gt;</code></td><td>—</td><td>Window size, e.g. <code>1280x800</code>.</td></tr>
+          <tr><td><code>--browser-arg &lt;arg&gt;</code></td><td>—</td><td>Extra browser CLI arg (repeatable).</td></tr>
+          <tr><td><code>--env &lt;file&gt;</code></td><td>manifest <code>env:</code> or <code>./.env</code></td><td>.env file to load.</td></tr>
+          <tr><td><code>--screenshots &lt;dir&gt;</code></td><td><code>screenshots</code></td><td>Screenshot output directory.</td></tr>
+          <tr><td><code>--keep-going</code></td><td>off</td><td>Don't stop at the first failure.</td></tr>
+          <tr><td><code>--shot-on-fail</code></td><td>off</td><td>Screenshot each failed task. <a href="screenshots.html">Details →</a></td></tr>
+          <tr><td><code>--timeout &lt;ms&gt;</code></td><td><code>5000</code></td><td>Implicit wait budget. <a href="waits.html">Details →</a></td></tr>
+        </tbody>
+      </table>
+      <p>Exit code is non-zero if any task failed. On exit — pass or fail — the WebDriver session is always closed, so a failed run never leaves a dangling session behind.</p>
+
+      <h2>Troubleshooting</h2>
+      <table>
+        <thead><tr><th>Symptom</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td><code>Session is already started</code></td><td>A previous run was hard-killed (Ctrl-C/crash). Restart the WebDriver server once. htest closes its own session on every clean exit.</td></tr>
+          <tr><td>Slow before it navigates</td><td>A text-matched selector is scanning too many elements. Narrow the CSS first — see <a href="selectors.html">Selectors</a>.</td></tr>
+          <tr><td>Assert fails intermittently</td><td>Async content. Raise <code>--timeout</code>, or gate on the real signal with <code>wait_for</code> — see <a href="waits.html">Waits</a>.</td></tr>
+          <tr><td><code>missing variable ...</code></td><td>A <code>{{ VAR }}</code> had no value. Define it in <code>vars:</code>, a <code>.env</code>, or the environment.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="pager">
+        <a href="index.html">← Overview</a>
+        <a href="tutorial.html">Tutorial →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

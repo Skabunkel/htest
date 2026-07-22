@@ -1,0 +1,32 @@
+# Example playbook — the CI orchestration unit.
+#
+# A single manifest is a *suite* of tasks (the base unit people build on); this
+# playbook collects several, sets run-wide settings once, and orders them with
+# file-level `needs`. In CI you point at one file:
+#
+#   htest playbook examples/ci.playbook.yaml
+#
+# Any setting can be overridden on the CLI, e.g. --headless --shot-on-fail.
+
+settings:
+  driver: mock            # swap to `webdriver` for a real browser
+  screenshots: screenshots
+  shot_on_fail: false
+  keep_going: false
+  timeout: 5000           # implicit-wait budget (ms)
+  max_run_time: 120       # fail the rest if the whole run exceeds 120s
+
+  # For a real Firefox run in CI, let htest own the driver lifecycle:
+  #   driver: webdriver
+  #   browser: firefox
+  #   headless: true
+  #   manage_driver: true   # htest spawns geckodriver and kills it on exit
+  #   driver_port: 4444
+  #   driver_path: geckodriver   # optional; else looked up on PATH
+
+# Suite files are relative to this playbook's directory. `needs` is file-level:
+# every task in a needed suite must pass before any task in the dependent one.
+suites:
+  - file: manifest.yaml
+  - file: reporting.yaml
+    needs: [manifest.yaml]   # all of manifest.yaml before reporting.yaml

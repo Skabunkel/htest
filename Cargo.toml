@@ -1,0 +1,30 @@
+[package]
+name = "headless-tests"
+version = "0.1.0"
+edition = "2021"
+description = "CLI integration test runner driving browsers over WebDriver via YAML manifests"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "htest"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+petgraph = "0.6"
+minijinja = "2"
+dotenvy = "0.15"
+anyhow = "1"
+thiserror = "1"
+
+# --- WebDriver backend ---
+# Talks to any running WebDriver server (geckodriver / chromedriver).
+fantoccini = "0.21"
+tokio = { version = "1", features = ["rt", "macros", "time", "net"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

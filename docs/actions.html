@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Actions &amp; steps · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html" class="active">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+        <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Actions &amp; steps</h1>
+      <p class="lead">A task's <code>steps</code> are an ordered list. Each step is a single-key map — the key names the action, the value is its argument. Here's every step type.</p>
+
+      <p>Where a step takes a <code>&lt;selector&gt;</code> it's either a plain CSS string or the structured form — see <a href="selectors.html">Selectors</a>. Steps that act on an element (<code>click</code>, <code>fill</code>, <code>upload</code>) <strong>implicitly wait</strong> for it to appear first; see <a href="waits.html">Waits</a>.</p>
+
+      <h2>At a glance</h2>
+      <table>
+        <thead><tr><th>Step</th><th>Form</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>goto</code></td><td><code>goto: "&lt;url&gt;"</code></td><td>Navigate to a URL.</td></tr>
+          <tr><td><code>click</code></td><td><code>click: &lt;selector&gt;</code></td><td>Click an element.</td></tr>
+          <tr><td><code>fill</code></td><td><code>fill: { selector, value }</code></td><td>Clear an input, then type text.</td></tr>
+          <tr><td><code>upload</code></td><td><code>upload: { selector, path }</code></td><td>Set a file <code>&lt;input&gt;</code> to a local file.</td></tr>
+          <tr><td><code>assert</code></td><td><code>assert: { selector, exists, text }</code></td><td>Check presence / text (polls).</td></tr>
+          <tr><td><code>wait_for</code></td><td><code>wait_for: &lt;selector&gt;</code> / <code>{ selector, until, timeout }</code></td><td>Block until present or absent.</td></tr>
+          <tr><td><code>wait</code></td><td><code>wait: &lt;ms&gt;</code></td><td>Fixed, unconditional pause.</td></tr>
+          <tr><td><code>screenshot</code></td><td><code>screenshot: "&lt;name.png&gt;"</code></td><td>Save a viewport image.</td></tr>
+        </tbody>
+      </table>
+
+      <h2><code>goto</code> — navigate</h2>
+      <p>Load a URL. The WebDriver backend uses <code>pageLoadStrategy: eager</code>, so it returns at DOMContentLoaded rather than waiting on every image and tracker.</p>
+      <pre><code>- goto: "{{ BASE_URL }}/login"
+- goto: "file:///srv/pages/index.html"          # absolute file:// works too
+- goto: "file://../demo/index.html"             # relative to this manifest
+- goto: "./pages/index.html"                    # bare relative path, same thing</code></pre>
+
+      <h3 id="relative-file-locations">Relative file locations</h3>
+      <p>A local page does not need a machine-specific absolute path. Anything that is not an <code>http(s)://</code> (or <code>data:</code>, <code>about:</code>, …) URL is treated as a file path and expanded to an absolute <code>file://</code> URL when the manifest loads:</p>
+      <table>
+        <thead><tr><th>written</th><th>treated as</th></tr></thead>
+        <tbody>
+          <tr><td><code>file://./x.html</code>, <code>file://../x.html</code>, <code>file://x.html</code></td><td>relative file path</td></tr>
+          <tr><td><code>./x.html</code>, <code>../x.html</code>, <code>~/x.html</code>, <code>/srv/x.html</code>, <code>C:\x.html</code></td><td>file path</td></tr>
+          <tr><td><code>pages/x.html</code></td><td>file path <strong>only if</strong> that file exists</td></tr>
+          <tr><td><code>https://…</code>, <code>data:…</code>, <code>localhost:8080/app</code></td><td>left untouched</td></tr>
+        </tbody>
+      </table>
+      <p>Relative paths are resolved against <strong>the directory you run htest from</strong> first; if the file isn't there, against <strong>the manifest's own directory</strong>. So relative paths mean what they normally mean, a checkout runs on any machine without editing, and a manifest invoked from somewhere else still finds the files next to it. <code>~</code> and spaces are handled (<code>./my pages/a.html</code> → <code>file:///…/my%20pages/a.html</code>).</p>
+
+      <h2><code>click</code> — click</h2>
+      <p>Click the element the selector resolves to. Waits for it to appear first, and the driver scrolls it into view — so a button below the fold is fine.</p>
+      <pre><code>- click: "#submit"                                  # plain CSS
+- click: { css: "tr", contains: "Alice", find: { css: "button", text: "Delete" } }</code></pre>
+
+      <h2><code>fill</code> — type into an input</h2>
+      <p>Clears the field, then types the value with real key events (so <code>input</code>/<code>change</code> handlers and frameworks react). Waits for the field first. Templating applies to <code>value</code>.</p>
+      <pre><code>- fill: { selector: "#user", value: "{{ USERNAME }}" }
+- fill: { selector: "#search", value: "hello world" }</code></pre>
+
+      <h2><code>upload</code> — set a file input</h2>
+      <p>Points a <code>&lt;input type=file&gt;</code> at a file on disk. A relative <code>path</code> is resolved like a relative <code>goto</code> — against the directory you run htest from, then the manifest's own directory (an absolute path passes through); the file must exist or the step fails with a clear message before the driver is touched.</p>
+      <pre><code>- upload: { selector: "#avatar", path: "demo/assets/sample.txt" }</code></pre>
+      <div class="callout">
+        <strong>Local drivers only.</strong> The file must live on the same machine as the browser. Prefer a relative <code>path</code> so manifests stay portable across checkouts.
+      </div>
+
+      <h2><code>assert</code> — check the page</h2>
+      <p>Verify a selector's presence and, optionally, its exact text. It <em>polls</em> until the expectation holds or the wait budget expires, so you rarely need an explicit wait before it.</p>
+      <ul>
+        <li><code>exists</code> (default <code>true</code>) — wait for the element to appear; <code>exists: false</code> waits for it to <em>disappear</em>.</li>
+        <li><code>text</code> (optional) — the element's trimmed text must equal this exactly.</li>
+      </ul>
+      <pre><code>- assert: { selector: "#dashboard", exists: true }
+- assert: { selector: ".row-alice", exists: false }        # gone after delete
+- assert: { selector: "h1", text: "Welcome, Alice" }       # exact text</code></pre>
+      <p>On failure the task fails; with <code>--shot-on-fail</code> a screenshot is captured. A <code>text</code> that never matches within the budget is a failure too.</p>
+
+      <h2><code>wait_for</code> — wait for a condition</h2>
+      <p>Block until a selector is <code>present</code> (default) or <code>absent</code>, then continue immediately. Prefer it over <code>wait</code>. On timeout the task <strong>fails</strong>.</p>
+      <pre><code>- wait_for: "#ready"                                        # until present
+- wait_for: { selector: ".spinner", until: absent, timeout: 15000 }</code></pre>
+      <p>Full treatment — including the spinner pattern — in <a href="waits.html">Waits &amp; timing</a>.</p>
+
+      <h2><code>wait</code> — fixed pause</h2>
+      <p>Sleep a fixed number of milliseconds, unconditionally. A last resort for signal-less delays; reach for <code>wait_for</code> instead whenever there's a DOM condition to key off.</p>
+      <pre><code>- wait: 250</code></pre>
+
+      <h2><code>screenshot</code> — capture the viewport</h2>
+      <p>Save a PNG into the screenshots directory (<code>--screenshots</code>, default <code>screenshots/</code>). Subdirectories in the name are created as needed. See <a href="screenshots.html">Screenshots</a> for automatic <code>--shot-on-fail</code> captures.</p>
+      <pre><code>- screenshot: "after-login.png"
+- screenshot: "login/step2.png"</code></pre>
+
+      <h2>Putting it together</h2>
+      <pre><code>- goto: "{{ BASE_URL }}/signup"
+- fill: { selector: "#name", value: "Ada" }
+- upload: { selector: "#avatar", path: "demo/assets/sample.txt" }
+- click: "#submit"
+- wait_for: { selector: ".spinner", until: absent }
+- assert: { selector: "#done", text: "Saved" }
+- screenshot: "signup-done.png"</code></pre>
+
+      <div class="pager">
+        <a href="tutorial.html">← Tutorial</a>
+        <a href="selectors.html">Selectors →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

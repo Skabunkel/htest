@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htest playground — Form</title>
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">htest playground</span>
+    <a id="nav-home" href="index.html">Home</a>
+    <a id="nav-popup" href="popup.html">Popup</a>
+    <a id="nav-spinner" href="spinner.html">Spinner</a>
+    <a id="nav-form" class="here" href="form.html">Form</a>
+    <a id="nav-snake" href="snake.html">Snake</a>
+    <a id="nav-scroll" href="scroll.html">Scroll</a>
+  </header>
+
+  <main>
+    <h1>Form</h1>
+    <p class="lead">Fill fields, tick a box, pick a plan and a file, then submit. The values are echoed into a summary the tour can assert against.</p>
+
+    <form id="signup" class="card">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" placeholder="Ada Lovelace">
+
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" placeholder="ada@example.com">
+
+      <label for="bio">Bio</label>
+      <textarea id="bio" name="bio" placeholder="A short bio"></textarea>
+
+      <div class="row">
+        <input type="checkbox" id="subscribe" name="subscribe">
+        <label for="subscribe">Subscribe to the newsletter</label>
+      </div>
+
+      <label>Plan</label>
+      <div class="row">
+        <input type="radio" id="plan-free" name="plan" value="free" checked>
+        <label for="plan-free">Free</label>
+        <input type="radio" id="plan-pro" name="plan" value="pro">
+        <label for="plan-pro">Pro</label>
+      </div>
+
+      <label for="avatar">Avatar file</label>
+      <input type="file" id="avatar" name="avatar">
+
+      <div style="margin-top:18px">
+        <button type="submit" id="submit">Submit</button>
+      </div>
+      <div id="slot"></div>
+    </form>
+  </main>
+
+  <script>
+    document.getElementById('signup').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var old = document.getElementById('summary');
+      if (old) old.remove();
+
+      var name = document.getElementById('name').value || '(none)';
+      var email = document.getElementById('email').value || '(none)';
+      var subscribed = document.getElementById('subscribe').checked ? 'yes' : 'no';
+      var planEl = document.querySelector('input[name=plan]:checked');
+      var plan = planEl ? planEl.value : '(none)';
+      var fileEl = document.getElementById('avatar');
+      var file = fileEl.files && fileEl.files.length ? fileEl.files[0].name : '(none)';
+
+      var box = document.createElement('div');
+      box.id = 'summary';
+      box.className = 'summary result';
+      box.innerHTML =
+        '<dl>' +
+        '<dt>Name</dt><dd id="sum-name">' + name + '</dd>' +
+        '<dt>Email</dt><dd id="sum-email">' + email + '</dd>' +
+        '<dt>Subscribed</dt><dd id="sum-subscribed">' + subscribed + '</dd>' +
+        '<dt>Plan</dt><dd id="sum-plan">' + plan + '</dd>' +
+        '<dt>File</dt><dd id="sum-file">' + file + '</dd>' +
+        '</dl>';
+      document.getElementById('slot').appendChild(box);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Screenshots · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html" class="active">Screenshots</a>
+        <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Screenshots</h1>
+      <p class="lead">Capture the viewport on purpose with a step, or automatically whenever a task fails.</p>
+
+      <h2>On purpose — the <code>screenshot</code> step</h2>
+      <p>Add a <code>screenshot</code> step wherever you want a snapshot. The value is a filename; it's written into the screenshots directory.</p>
+      <pre><code>- goto: "{{ BASE_URL }}"
+- wait_for: "h1"
+- screenshot: "home.png"</code></pre>
+      <p>The output directory is <code>screenshots/</code> by default; change it with <code>--screenshots</code>:</p>
+      <pre><code>htest run smoke.yaml --driver webdriver --screenshots artifacts/shots</code></pre>
+      <p>The directory is created if it doesn't exist. Subdirectories in the name work too (e.g. <code>screenshot: "login/step2.png"</code>).</p>
+
+      <h2>On failure — <code>--shot-on-fail</code></h2>
+      <p>Pass <code>--shot-on-fail</code> and htest captures a screenshot the moment any task fails — no <code>screenshot</code> step required. Perfect for CI, where you want to see the page state at the point of failure.</p>
+      <pre><code>htest run suite.yaml --driver webdriver --shot-on-fail</code></pre>
+      <p>Each failed task produces one file named <code>FAIL-&lt;task-id&gt;.png</code> in the screenshots directory. The task's canonical id (<code>namespace:name</code>) is used, with <code>:</code> replaced by <code>-</code> so it's a valid filename:</p>
+      <pre><code>screenshots/
+  FAIL-app-login.png          # from task  app:login
+  FAIL-reporting-audit.png    # from task  reporting:audit</code></pre>
+
+      <div class="callout">
+        <strong>Combine both.</strong> Use explicit <code>screenshot</code> steps to document key states in a passing run, and <code>--shot-on-fail</code> as a safety net so a failure always leaves visual evidence. They write to the same directory and don't collide (<code>FAIL-</code> prefix).
+      </div>
+
+      <h2>A CI-friendly invocation</h2>
+      <pre><code>htest run suite.yaml \
+  --driver webdriver --browser firefox --headless \
+  --window 1280x800 \
+  --screenshots artifacts \
+  --shot-on-fail \
+  --keep-going          # run every task; collect all failures + shots</code></pre>
+      <p>With <code>--keep-going</code>, htest doesn't stop at the first failure, so one run surfaces every failing task (and, with <code>--shot-on-fail</code>, a screenshot for each).</p>
+
+      <div class="pager">
+        <a href="waits.html">← Waits &amp; timing</a>
+        <a href="loops.html">Loops →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

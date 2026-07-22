@@ -1,0 +1,42 @@
+# Live fixture exercising hierarchical, text-scoped selectors against
+# examples/fixtures/table.html.
+#
+#   geckodriver --port 4444 &
+#   htest run examples/fixtures.yaml --driver webdriver --browser firefox --headless
+
+id: fx
+vars:
+  # Relative to this manifest — resolved to an absolute file:// URL at load.
+  PAGE: "file://./fixtures/table.html"
+
+tasks:
+  - name: delete_alice
+    steps:
+      - goto: "{{ PAGE }}"
+      - assert: { selector: "#dashboard", exists: true }
+
+      # The Delete button that lives in the .row whose text contains "Alice".
+      # Pure CSS cannot express "row containing text X".
+      - assert:
+          selector:
+            css: ".row"
+            contains: "Alice"
+            find: { css: "button", contains: "Delete" }
+          exists: true
+
+      - click:
+          css: ".row"
+          contains: "Alice"
+          find: { css: "button", contains: "Delete" }
+
+      # Alice's row is now gone...
+      - assert:
+          selector: { css: ".row", contains: "Alice" }
+          exists: false
+      # ...but Bob's row remains.
+      - assert:
+          selector: { css: ".row", contains: "Bob" }
+          exists: true
+
+      - fill: { selector: "#search", value: "hello world" }
+      - screenshot: "fixture.png"

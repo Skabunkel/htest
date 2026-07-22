@@ -1,0 +1,51 @@
+# Example manifest. Run order is derived from `needs`, not file order.
+#
+#   htest graph examples/manifest.yaml
+#   htest run   examples/manifest.yaml --driver mock
+#
+# Force the create path with the mock backend:
+#   HTEST_MOCK_ABSENT=.row-alice htest run examples/manifest.yaml --driver mock
+
+vars:
+  # Fallback defaults; a .env (or --env) overrides these.
+  BASE_URL: "http://localhost:8080"
+  USERNAME: "alice"
+
+tasks:
+  - name: login
+    steps:
+      - goto: "{{ BASE_URL }}/login"
+      - fill: { selector: "#user", value: "{{ USERNAME }}" }
+      - fill: { selector: "#pass", value: "secret" }
+      - click: "#submit"
+      - assert: { selector: "#dashboard", exists: true }
+      - screenshot: "after-login.png"
+
+  # Idempotent create: if the row already exists, skip. Otherwise create it
+  # and verify the new row appears.
+  - name: create_user
+    needs: [login]
+    idempotent:
+      check: { selector: ".row-{{ USERNAME }}", exists: true }
+      on_exists: skip
+    steps:
+      - goto: "{{ BASE_URL }}/users/new"
+      - fill: { selector: "#name", value: "{{ USERNAME }}" }
+      - click: "#create"
+      - assert: { selector: ".row-{{ USERNAME }}", exists: true }
+      - screenshot: "user-created.png"
+
+  - name: edit_user
+    needs: [create_user]
+    steps:
+      - goto: "{{ BASE_URL }}/users/{{ USERNAME }}/edit"
+      - fill: { selector: "#display-name", value: "Alice A." }
+      - click: "#save"
+      - assert: { selector: "#toast-saved", exists: true }
+
+  # No dependency on the user tasks -> same layer as `login`, runs in parallel
+  # once a concurrent executor lands.
+  - name: healthcheck
+    steps:
+      - goto: "{{ BASE_URL }}/health"
+      - assert: { selector: "#status-ok", exists: true }

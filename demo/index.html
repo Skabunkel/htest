@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htest playground — Home</title>
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">htest playground</span>
+    <a id="nav-home" class="here" href="index.html">Home</a>
+    <a id="nav-popup" href="popup.html">Popup</a>
+    <a id="nav-spinner" href="spinner.html">Spinner</a>
+    <a id="nav-form" href="form.html">Form</a>
+    <a id="nav-snake" href="snake.html">Snake</a>
+    <a id="nav-scroll" href="scroll.html">Scroll</a>
+  </header>
+
+  <main>
+    <h1 id="home-title">htest playground</h1>
+    <p class="lead">A tiny, self-contained app to run htest against — no server, no network. The <code>examples/tour.yaml</code> manifest drives every page here.</p>
+
+    <div class="card">
+      <h2>What each page exercises</h2>
+      <ul>
+        <li><strong>Popup</strong> — a button opens a modal that's added to / removed from the DOM (present → absent).</li>
+        <li><strong>Spinner</strong> — a loader appears, then clears after a delay (<code>wait_for … until: absent</code>).</li>
+        <li><strong>Form</strong> — text, checkbox, radio, textarea, and a file picker, echoed into a summary.</li>
+        <li><strong>Snake</strong> — a grid of checkboxes; toggle the snake path to win.</li>
+        <li><strong>Scroll</strong> — a tall page with a button far below the fold.</li>
+      </ul>
+      <p id="home-note">Open this over <code>file://</code>. The tour points at this folder with a relative <code>BASE_URL</code> (<code>file://../demo</code>), so no path editing is needed.</p>
+    </div>
+  </main>
+</body>
+</html>

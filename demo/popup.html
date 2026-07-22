@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htest playground — Popup</title>
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">htest playground</span>
+    <a id="nav-home" href="index.html">Home</a>
+    <a id="nav-popup" class="here" href="popup.html">Popup</a>
+    <a id="nav-spinner" href="spinner.html">Spinner</a>
+    <a id="nav-form" href="form.html">Form</a>
+    <a id="nav-snake" href="snake.html">Snake</a>
+    <a id="nav-scroll" href="scroll.html">Scroll</a>
+  </header>
+
+  <main>
+    <h1>Popup</h1>
+    <p class="lead">The modal is created in the DOM on open and removed on close, so <code>assert exists: true/false</code> is meaningful.</p>
+    <div class="card">
+      <button id="open-popup">Open popup</button>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById('open-popup').addEventListener('click', function () {
+      if (document.getElementById('popup')) return;
+      var el = document.createElement('div');
+      el.id = 'popup';
+      el.className = 'modal';
+      el.innerHTML =
+        '<div class="modal-box">' +
+        '  <p id="popup-text">Hello from the popup!</p>' +
+        '  <button id="close-popup">Close</button>' +
+        '</div>';
+      document.body.appendChild(el);
+      document.getElementById('close-popup').addEventListener('click', function () {
+        el.remove();
+      });
+    });
+  </script>
+</body>
+</html>

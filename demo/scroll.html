@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htest playground — Scroll</title>
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">htest playground</span>
+    <a id="nav-home" href="index.html">Home</a>
+    <a id="nav-popup" href="popup.html">Popup</a>
+    <a id="nav-spinner" href="spinner.html">Spinner</a>
+    <a id="nav-form" href="form.html">Form</a>
+    <a id="nav-snake" href="snake.html">Snake</a>
+    <a id="nav-scroll" class="here" href="scroll.html">Scroll</a>
+  </header>
+
+  <main>
+    <h1 id="scroll-top">Scroll</h1>
+    <p class="lead">The button is far below the fold. WebDriver scrolls it into view before clicking — no manual scroll step needed.</p>
+
+    <div class="spacer">▼ keep scrolling ▼</div>
+    <div class="spacer">▼ still going ▼</div>
+    <div class="spacer">▼ almost there ▼</div>
+
+    <div class="card">
+      <button id="bottom-btn">I'm at the bottom</button>
+      <div id="slot"></div>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById('bottom-btn').addEventListener('click', function () {
+      if (document.getElementById('reached')) return;
+      var el = document.createElement('div');
+      el.id = 'reached';
+      el.className = 'result';
+      el.textContent = 'Reached the bottom!';
+      document.getElementById('slot').appendChild(el);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tutorial · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html" class="active">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+      <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Tutorial</h1>
+      <p class="lead">Build a real test from scratch: land on a page, act on it, assert the result, then chain tasks with prerequisites and make reruns safe.</p>
+
+      <div class="callout">
+        <strong>Practice target included.</strong> The repo ships a self-contained demo app in <code>demo/</code> (popups, spinners, a form with a file picker, checkbox "snake", scrolling) and a manifest that tours it, <code>examples/tour.yaml</code>. It runs over <code>file://</code> with no server or network — the ideal thing to point your first real-browser run at:
+        <pre><code>geckodriver --port 4444 &amp;
+htest run examples/tour.yaml --driver webdriver --browser firefox --keep-going --shot-on-fail</code></pre>
+      </div>
+
+      <h2>Anatomy of a manifest</h2>
+      <p>A manifest is one YAML document. Top level holds an optional <code>id</code> (namespace), <code>vars</code>, and a list of <code>tasks</code>. Each task has a <code>name</code>, optional <code>needs</code> / <code>idempotent</code>, and an ordered list of <code>steps</code>.</p>
+      <pre><code>id: app                       # optional namespace (default: file stem)
+vars:                         # highest precedence (these win over .env)
+  BASE_URL: "http://localhost:8080"
+  USERNAME: "alice"
+
+tasks:
+  - name: login
+    steps:
+      - goto:  "{{ BASE_URL }}/login"
+      - fill:  { selector: "#user", value: "{{ USERNAME }}" }
+      - click: "#submit"
+      - assert: { selector: "#dashboard", exists: true }
+      - screenshot: "after-login.png"</code></pre>
+
+      <h2>Step 1 — navigate and confirm</h2>
+      <p>Every test starts by landing somewhere and confirming it rendered. <code>goto</code> returns at DOMContentLoaded; the <code>assert</code> then polls until the element is really there (see <a href="waits.html">Waits</a>), so you don't need a fixed pause.</p>
+      <pre><code>- goto: "{{ BASE_URL }}/login"
+- assert: { selector: "#login-form", exists: true }</code></pre>
+
+      <h2>Step 2 — act</h2>
+      <p><code>fill</code> types into an input (it clears first); <code>click</code> clicks. Both implicitly wait for their target to appear before acting.</p>
+      <pre><code>- fill:  { selector: "#user", value: "{{ USERNAME }}" }
+- fill:  { selector: "#pass", value: "{{ PASSWORD }}" }
+- click: "#submit"</code></pre>
+
+      <h2>Step 3 — assert the outcome</h2>
+      <p><code>assert</code> checks presence, and optionally exact text. Use <code>exists: false</code> to assert something is <em>gone</em> — it polls until the element disappears.</p>
+      <pre><code>- assert: { selector: "#dashboard", exists: true }
+- assert: { selector: ".error", exists: false }
+- assert: { selector: "#greeting", exists: true, text: "Welcome, alice" }</code></pre>
+
+      <h2>Step 4 — chain tasks with <code>needs</code></h2>
+      <p><code>needs</code> declares prerequisites. htest topologically sorts the graph, so order in the file doesn't matter — dependencies do. If a prerequisite fails, its dependents are <strong>blocked</strong> rather than run against a broken state.</p>
+      <pre><code>tasks:
+  - name: login
+    steps: [ ... ]
+
+  - name: create_user
+    needs: [login]              # runs only after login passes
+    steps:
+      - goto:  "{{ BASE_URL }}/users/new"
+      - fill:  { selector: "#name", value: "{{ USERNAME }}" }
+      - click: "#create"
+      - assert: { selector: ".row-{{ USERNAME }}", exists: true }</code></pre>
+      <p>Preview the resolved order without running anything:</p>
+      <pre><code>htest graph mytest.yaml</code></pre>
+
+      <h2>Step 5 — make it idempotent (safe reruns)</h2>
+      <p>An <code>idempotent</code> block runs a <code>check</code> predicate <em>before</em> the steps. If the resource is already in the expected state, <code>on_exists</code> decides what happens: <code>skip</code> (default), <code>continue</code>, or <code>fail</code>. This is "create if not exists" — the key to repeatable runs.</p>
+      <pre><code>- name: create_user
+  needs: [login]
+  idempotent:
+    check: { selector: ".row-{{ USERNAME }}", exists: true }
+    on_exists: skip             # user already there? skip the steps
+  steps:
+    - goto:  "{{ BASE_URL }}/users/new"
+    - fill:  { selector: "#name", value: "{{ USERNAME }}" }
+    - click: "#create"
+    - assert: { selector: ".row-{{ USERNAME }}", exists: true }</code></pre>
+
+      <h2>Step 6 — repeat a task with <code>loop</code></h2>
+      <p>Creating five accounts shouldn't mean five copy-pasted tasks. <code>loop:</code> repeats one task over a range or a list; htest expands it <strong>when the manifest loads</strong> into one ordinary task per item, named <code>&lt;task&gt;[&lt;item&gt;]</code>.</p>
+      <pre><code>- name: create_user
+  loop: { var: n, from: 1, to: 5 }      # user1 … user5 (both ends included)
+  needs: [login]
+  steps:
+    - goto:  "{{ BASE_URL }}/users/new"
+    - fill:  { selector: "#name", value: "user{{ n }}" }
+    - click: "#create"
+    - assert: { selector: ".row-user{{ n }}", exists: true }</code></pre>
+      <p>Because expansion happens up front, <code>htest graph</code> shows exactly what will run:</p>
+      <pre><code>htest graph mytest.yaml
+#   layer 1 (parallel-safe): app:create_user[1], app:create_user[2], …</code></pre>
+      <table>
+        <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>loop: { var: n, from: 1, to: 5 }</code></td><td><code>1 2 3 4 5</code> — inclusive; use <code>from: 0, to: 4</code> for <code>user0</code>…<code>user4</code></td></tr>
+          <tr><td><code>loop: { var: n, from: 0, to: 10, step: 2 }</code></td><td><code>0 2 4 6 8 10</code>; a negative <code>step</code> (or <code>to &lt; from</code>) counts down</td></tr>
+          <tr><td><code>loop: { var: u, items: [alice, bob] }</code></td><td>one task per item</td></tr>
+          <tr><td><code>loop: [alice, bob]</code></td><td>shorthand; the variable is called <code>item</code></td></tr>
+        </tbody>
+      </table>
+      <p>Inside the task you also get <code>{{ loop_index }}</code> (0-based) and <code>{{ loop_index1 }}</code> (1-based). Bounds can be templated (<code>to: "{{ USER_COUNT }}"</code>), so a single variable resizes the run — from <code>vars</code>, or from <code>.env</code>/<code>--env</code> when <code>vars</code> doesn't set it (manifest <code>vars</code> win over a dotenv).</p>
+      <p>Depending on a looped task works both ways:</p>
+      <pre><code>- name: report
+  needs: [create_user]            # waits for every iteration
+- name: audit
+  needs: ["create_user[3]"]       # waits for just that one</code></pre>
+      <div class="callout">
+        The loop variable may appear anywhere in the task <strong>except <code>name:</code></strong> — htest appends <code>[item]</code> itself, and a name that changed per iteration would make <code>needs:</code> ambiguous. See <code>examples/loops.yaml</code> for a runnable version against the demo app, and <a href="loops.html">Loops</a> for the full reference.
+      </div>
+
+      <h2>Step 7 — split across files</h2>
+      <p>Each manifest gets a <strong>namespace</strong> (its <code>id:</code>, else the filename stem). A task's canonical id is <code>namespace:name</code>. A <code>needs</code> entry is bare (same file) or qualified with <code>:</code> (another file).</p>
+      <pre><code># reporting.yaml
+tasks:
+  - name: verify_audit_log
+    needs: [manifest:edit_user]     # waits for edit_user in manifest.yaml
+    steps: [ ... ]</code></pre>
+      <pre><code>htest run examples/manifest.yaml examples/reporting.yaml</code></pre>
+      <p>Each file is templated with its own <code>vars</code>/<code>.env</code>; the process environment is shared. Namespaces must be unique across the files you pass.</p>
+
+      <h2>Variables &amp; environments</h2>
+      <p>The whole document is rendered with <code>{{ VAR }}</code> before parsing. Precedence, low → high: process env → <code>.env</code> file → manifest <code>vars</code>. A missing variable is a hard error (never a silent blank). Point at a specific environment with <code>--env staging.env</code>.</p>
+
+      <h2>Step reference</h2>
+      <table>
+        <thead><tr><th>Step</th><th>Form</th></tr></thead>
+        <tbody>
+          <tr><td><code>goto</code></td><td><code>goto: "&lt;url&gt;"</code></td></tr>
+          <tr><td><code>click</code></td><td><code>click: &lt;selector&gt;</code></td></tr>
+          <tr><td><code>fill</code></td><td><code>fill: { selector: &lt;selector&gt;, value: "&lt;v&gt;" }</code></td></tr>
+          <tr><td><code>upload</code></td><td><code>upload: { selector: &lt;file-input&gt;, path: "&lt;file&gt;" }</code> — set a file <code>&lt;input&gt;</code> (relative path resolves against the CWD, then the manifest's directory)</td></tr>
+          <tr><td><code>assert</code></td><td><code>assert: { selector: &lt;selector&gt;, exists: true, text: "&lt;opt&gt;" }</code></td></tr>
+          <tr><td><code>screenshot</code></td><td><code>screenshot: "&lt;name.png&gt;"</code></td></tr>
+          <tr><td><code>wait</code></td><td><code>wait: &lt;ms&gt;</code> — fixed pause (last resort)</td></tr>
+          <tr><td><code>wait_for</code></td><td><code>wait_for: &lt;selector&gt;</code> or <code>{ selector, until: present|absent, timeout }</code></td></tr>
+        </tbody>
+      </table>
+      <p>See <a href="selectors.html">Selectors</a> for what a <code>&lt;selector&gt;</code> can be, and <a href="waits.html">Waits</a> for <code>wait</code> vs <code>wait_for</code>.</p>
+
+      <div class="pager">
+        <a href="getting-started.html">← Getting started</a>
+        <a href="actions.html">Actions &amp; steps →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

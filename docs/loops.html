@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loops · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+      <a href="loops.html" class="active">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Loops</h1>
+      <p class="lead">Five user accounts shouldn't mean five copy-pasted tasks. <code>loop:</code> repeats one task over a range or a list — and expands it into real, individually reported tasks before the run starts.</p>
+
+      <h2>The idea</h2>
+      <p>A <code>loop:</code> on a task is <strong>expanded when the manifest loads</strong>: htest renders the task once per item, with the loop variable in scope, and emits one ordinary task per iteration named <code>&lt;task&gt;[&lt;item&gt;]</code>. Nothing downstream knows loops exist — the graph, the run order, the report and the exit code all see plain tasks.</p>
+      <p>That is the whole design in one sentence, and it is what makes loops predictable: <em>there is no loop at run time.</em></p>
+
+      <pre><code># manifest
+- name: create_user
+  loop: { var: n, from: 1, to: 5 }
+  steps:
+    - fill: { selector: "#name", value: "user{{ n }}" }</code></pre>
+      <pre><code># what actually runs
+create_user[1]   create_user[2]   create_user[3]   create_user[4]   create_user[5]</code></pre>
+
+      <h2>Quick start</h2>
+      <p>A task that creates <code>user1</code> … <code>user5</code>, then a task that waits for all of them:</p>
+      <pre><code>- name: create_user
+  loop: { var: n, from: 1, to: 5 }      # both ends included
+  needs: [open_app]
+  steps:
+    - goto:  "{{ BASE_URL }}/form.html"
+    - fill:  { selector: "#name",  value: "user{{ n }}" }
+    - fill:  { selector: "#email", value: "user{{ n }}@example.com" }
+    - click: "#submit"
+    - wait_for: "#summary"
+    - assert: { selector: "#sum-name", text: "user{{ n }}" }
+
+- name: report
+  needs: [create_user]                  # every iteration must pass first
+  steps:
+    - screenshot: "users-report.png"</code></pre>
+      <p>Check the expansion before running anything — <code>graph</code> needs no browser:</p>
+      <pre><code>$ htest graph examples/loops.yaml
+run graph (3 layers):
+  layer 0 (parallel-safe): users:open_app
+  layer 1 (parallel-safe): users:check_page[form], users:check_page[index], users:check_page[popup], users:create_user[1], users:create_user[2], users:create_user[3], users:create_user[4], users:create_user[5]
+  layer 2 (parallel-safe): users:report</code></pre>
+
+      <h2>Loop forms</h2>
+      <table>
+        <thead><tr><th>Form</th><th>Items</th></tr></thead>
+        <tbody>
+          <tr><td><code>loop: { var: n, from: 1, to: 5 }</code></td><td><code>1 2 3 4 5</code> — <strong>both ends included</strong></td></tr>
+          <tr><td><code>loop: { var: n, from: 0, to: 4 }</code></td><td><code>0 1 2 3 4</code> — for <code>user0</code>…<code>user4</code></td></tr>
+          <tr><td><code>loop: { var: n, from: 0, to: 10, step: 2 }</code></td><td><code>0 2 4 6 8 10</code></td></tr>
+          <tr><td><code>loop: { var: n, from: 3, to: 1 }</code></td><td><code>3 2 1</code> — counts down when <code>to &lt; from</code></td></tr>
+          <tr><td><code>loop: { var: u, items: [alice, bob] }</code></td><td><code>alice bob</code></td></tr>
+          <tr><td><code>loop: [alice, bob]</code></td><td>shorthand — the variable is called <code>item</code></td></tr>
+        </tbody>
+      </table>
+      <p>Ranges are inclusive on purpose: <code>from: 1, to: 5</code> is "user1 through user5", which is what everyone means when they say it. Use <code>from: 0, to: 4</code> for a zero-based set.</p>
+
+      <h2>What's in scope inside the task</h2>
+      <table>
+        <thead><tr><th>Variable</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td><code>{{ n }}</code> (whatever <code>var:</code> names; <code>item</code> by default)</td><td>the current item</td></tr>
+          <tr><td><code>{{ loop_index }}</code></td><td>iteration number, 0-based</td></tr>
+          <tr><td><code>{{ loop_index1 }}</code></td><td>iteration number, 1-based</td></tr>
+        </tbody>
+      </table>
+      <p>These sit on top of the normal template context (process env → <code>.env</code> → manifest <code>vars</code>), and work <em>anywhere</em> in the task: step values, selectors, <code>needs</code>, the <code>idempotent</code> check, screenshot names.</p>
+      <pre><code>- name: check_row
+  loop: { var: u, items: [alice, bob] }
+  steps:
+    - assert:
+        selector: { css: ".row", contains: "{{ u }}" }
+        exists: true
+    - screenshot: "row-{{ loop_index1 }}-{{ u }}.png"</code></pre>
+
+      <h3>Sizing a run from one variable</h3>
+      <p>The bounds are templated like everything else, so a single variable resizes the whole suite:</p>
+      <pre><code>vars:
+  LAST_USER: "5"
+tasks:
+  - name: create_user
+    loop: { var: n, from: 1, to: "{{ LAST_USER }}" }
+    steps: [ ... ]</code></pre>
+      <div class="callout">
+        Manifest <code>vars</code> have the <strong>highest</strong> precedence — they win over <code>.env</code> and <code>--env</code>. To size a run from a dotenv, leave the variable out of <code>vars:</code> entirely.
+      </div>
+
+      <h2>Depending on a looped task</h2>
+      <p><code>needs</code> works both ways, because the iterations are real tasks with real names:</p>
+      <pre><code>- name: report
+  needs: [create_user]            # waits for EVERY iteration
+
+- name: audit
+  needs: ["create_user[3]"]       # waits for just that one</code></pre>
+      <p>A looped task can also depend on <em>its own</em> matching iteration in another loop — the loop variable is in scope in <code>needs</code> too:</p>
+      <pre><code>- name: verify_user
+  loop: { var: n, from: 1, to: 5 }
+  needs: ["create_user[{{ n }}]"]   # verify_user[3] waits only for create_user[3]
+  steps: [ ... ]</code></pre>
+      <p>That is the difference between a fan-in (<code>needs: [create_user]</code>, one bottleneck) and a per-item chain (<code>create_user[{{ n }}]</code>, five independent pipelines) — worth choosing deliberately, since the graph's parallel layers reflect it.</p>
+
+      <h2>Naming rules</h2>
+      <p>htest appends <code>[item]</code> to each iteration itself, so the loop variable <strong>must not appear in <code>name:</code></strong>. A name that changed per iteration would leave no stable base name for <code>needs:</code> to refer to, so it is rejected up front:</p>
+      <pre><code>- name: "user{{ n }}"                 # ✗ rejected
+  loop: { var: n, from: 1, to: 2 }
+
+error: expanding users.yaml: manifest error: looped task `user1` renders a
+different name (`user2`) on another iteration: `n` must not appear in `name:`
+— htest appends `[item]` to each iteration itself</code></pre>
+      <p>Global variables in a name are fine (<code>name: "create_{{ ENVIRONMENT }}_user"</code>) — they render the same for every iteration.</p>
+
+      <h2>Loops and idempotency</h2>
+      <p>An <code>idempotent</code> block is evaluated per iteration, so "create if not exists" scales to a whole set without extra work — a rerun skips the users that already exist and creates only the missing ones:</p>
+      <pre><code>- name: create_user
+  loop: { var: n, from: 1, to: 5 }
+  idempotent:
+    check: { selector: ".row-user{{ n }}", exists: true }
+    on_exists: skip
+  steps: [ ... ]</code></pre>
+      <p>Try it against the mock backend, which seeds "already exists" from an env var — here users 1 and 2 exist, user 3 doesn't:</p>
+      <pre><code>$ HTEST_MOCK_ABSENT=.row-user3 htest run users.yaml
+results:
+  [SKIP] users:create_user[1] (0 ms) — idempotency gate: already satisfied
+  [SKIP] users:create_user[2] (0 ms) — idempotency gate: already satisfied
+  [PASS] users:create_user[3] (0 ms)
+
+1 passed, 2 skipped, 0 blocked, 0 failed</code></pre>
+
+      <h2>Gotchas</h2>
+      <ul>
+        <li><strong>An empty range is legal.</strong> <code>from: 5, to: 1, step: 1</code> yields no items, so the task simply doesn't exist — and a <code>needs:</code> on it resolves to nothing rather than failing.</li>
+        <li><strong>10,000 iterations is the cap.</strong> A typo like <code>to: 1000000</code> is rejected with a clear message instead of building a graph that never finishes.</li>
+        <li><strong>Items are strings.</strong> Numbers keep their plain form (<code>1</code>, not <code>1.0</code>); anything that isn't a string, number or bool is rejected.</li>
+        <li><strong>Task order in the file is still irrelevant.</strong> Iterations are independent of each other unless you wire them with <code>needs</code>.</li>
+        <li><strong>Document-level Jinja blocks.</strong> A manifest using <code>loop:</code> is parsed as YAML before templating, so it must be valid YAML on its own — <code>{% for %}</code> blocks spanning lines belong in a manifest without <code>loop:</code>.</li>
+      </ul>
+
+      <h2>Errors you might see</h2>
+      <table>
+        <thead><tr><th>Message</th><th>Cause</th></tr></thead>
+        <tbody>
+          <tr><td><code>`loop:` needs either `items:` or both `from:` and `to:`</code></td><td>A range is missing an end.</td></tr>
+          <tr><td><code>unknown `loop:` key `count`</code></td><td>Only <code>var</code>, <code>items</code>, <code>from</code>, <code>to</code>, <code>step</code> are accepted.</td></tr>
+          <tr><td><code>`loop: to:` is not a number: `x`</code></td><td>A bound (or the variable it came from) isn't an integer.</td></tr>
+          <tr><td><code>`loop: step:` must not be 0</code></td><td>A zero step would never terminate.</td></tr>
+          <tr><td><code>… must not appear in `name:`</code></td><td>The loop variable is used in the task name.</td></tr>
+          <tr><td><code>two looped tasks are both named `x`</code></td><td>Two loops share a base name; rename one.</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Full example</h2>
+      <p><code>examples/loops.yaml</code> in the repo runs against the bundled demo app — no server, no network:</p>
+      <pre><code>geckodriver --port 4444 &amp;
+htest graph examples/loops.yaml     # inspect the expansion
+htest run   examples/loops.yaml --driver webdriver --browser firefox --headless</code></pre>
+      <pre><code>results:
+  [PASS] users:open_app (90 ms)
+  [PASS] users:check_page[form] (26 ms)
+  [PASS] users:check_page[index] (14 ms)
+  [PASS] users:check_page[popup] (16 ms)
+  [PASS] users:create_user[1] (235 ms)
+  [PASS] users:create_user[2] (413 ms)
+  [PASS] users:create_user[3] (150 ms)
+  [PASS] users:create_user[4] (151 ms)
+  [PASS] users:create_user[5] (149 ms)
+  [PASS] users:report (39 ms)
+
+10 passed, 0 skipped, 0 blocked, 0 failed</code></pre>
+
+      <div class="callout">
+        <strong>Rule of thumb:</strong> loop over the <em>data</em>, not the workflow. One task per user, per plan, per locale — then let <code>needs</code> express what has to happen before and after. Because expansion happens at load time, <code>htest graph</code> always tells you exactly what you're about to run.
+      </div>
+
+      <div class="pager">
+        <a href="screenshots.html">← Screenshots</a>
+        <a href="playbooks.html">Playbooks →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htest playground — Spinner</title>
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">htest playground</span>
+    <a id="nav-home" href="index.html">Home</a>
+    <a id="nav-popup" href="popup.html">Popup</a>
+    <a id="nav-spinner" class="here" href="spinner.html">Spinner</a>
+    <a id="nav-form" href="form.html">Form</a>
+    <a id="nav-snake" href="snake.html">Snake</a>
+    <a id="nav-scroll" href="scroll.html">Scroll</a>
+  </header>
+
+  <main>
+    <h1>Spinner</h1>
+    <p class="lead">Click load: a spinner shows for ~1.5&nbsp;s, then clears and the result appears. Wait for the spinner to go <em>absent</em>.</p>
+    <div class="card">
+      <button id="load">Load data</button>
+      <div id="slot"></div>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById('load').addEventListener('click', function () {
+      var slot = document.getElementById('slot');
+      slot.innerHTML = '';
+      var res = document.getElementById('result');
+      if (res) res.remove();
+
+      var sp = document.createElement('div');
+      sp.id = 'spinner';
+      sp.className = 'spinner';
+      slot.appendChild(sp);
+
+      setTimeout(function () {
+        sp.remove();
+        var out = document.createElement('div');
+        out.id = 'result';
+        out.className = 'result';
+        out.textContent = 'Data loaded';
+        slot.appendChild(out);
+      }, 1500);
+    });
+  </script>
+</body>
+</html>

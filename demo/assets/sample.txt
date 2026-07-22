@@ -1,0 +1,2 @@
+htest playground — sample upload file.
+The form's file picker points here so the tour has a real file to select.

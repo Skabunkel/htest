@@ -1,0 +1,18 @@
+# Second manifest, in its own namespace (file stem: `reporting`).
+# Demonstrates a CROSS-FILE dependency: this task waits for a task defined in
+# examples/manifest.yaml (namespace `manifest`).
+#
+#   htest graph examples/manifest.yaml examples/reporting.yaml
+#   htest run   examples/manifest.yaml examples/reporting.yaml --driver mock
+
+vars:
+  BASE_URL: "http://localhost:8080"
+
+tasks:
+  - name: verify_audit_log
+    # `manifest:edit_user` = task `edit_user` from the `manifest` namespace.
+    needs: [manifest:edit_user]
+    steps:
+      - goto: "{{ BASE_URL }}/audit"
+      - assert: { selector: "#audit-entry-user-edited", exists: true }
+      - screenshot: "audit.png"

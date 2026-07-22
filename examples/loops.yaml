@@ -1,0 +1,57 @@
+# Looping: create five user accounts against the demo form, one task per user.
+#
+#   geckodriver --port 4444 &
+#   htest graph examples/loops.yaml                      # see the expansion
+#   htest run examples/loops.yaml --driver webdriver --browser firefox --headless
+#
+# `loop:` is expanded when the manifest loads: one ordinary task per item, named
+# `<task>[<item>]`. Everything downstream — graph, ordering, reporting — sees
+# plain tasks, so `htest graph` shows exactly what will run.
+
+id: users
+
+vars:
+  BASE_URL: "file://../demo"
+  # Change these two and the whole suite resizes. (Delete them here to size the
+  # run from a dotenv instead — manifest `vars` outrank `.env`/`--env`.)
+  FIRST_USER: "1"
+  LAST_USER: "5"
+
+tasks:
+  # Land once, so the loop below has something to depend on.
+  - name: open_app
+    steps:
+      - goto: "{{ BASE_URL }}/index.html"
+      - assert: { selector: "#home-title", text: "htest playground" }
+
+  # user1 … user5. Bounds are templated, so one variable resizes the whole run.
+  # Use `from: 0, to: 4` for user0 … user4.
+  - name: create_user
+    loop: { var: n, from: "{{ FIRST_USER }}", to: "{{ LAST_USER }}" }
+    needs: [open_app]
+    steps:
+      - goto: "{{ BASE_URL }}/form.html"
+      - fill: { selector: "#name", value: "user{{ n }}" }
+      - fill: { selector: "#email", value: "user{{ n }}@example.com" }
+      - click: "#plan-pro"
+      - click: "#submit"
+      - wait_for: "#summary"
+      - assert: { selector: "#sum-name", text: "user{{ n }}" }
+      - assert: { selector: "#sum-email", text: "user{{ n }}@example.com" }
+
+  # A bare `needs: [create_user]` waits for *every* iteration. Name one
+  # directly — `create_user[3]` — to depend on just that user.
+  - name: report
+    needs: [create_user]
+    steps:
+      - goto: "{{ BASE_URL }}/index.html"
+      - assert: { selector: "#home-title", exists: true }
+      - screenshot: "users-report.png"
+
+  # A list loop: the variable defaults to `item` when `var:` is omitted.
+  - name: check_page
+    loop: [index, form, popup]
+    needs: [open_app]
+    steps:
+      - goto: "{{ BASE_URL }}/{{ item }}.html"
+      - assert: { selector: "#nav-home", exists: true }

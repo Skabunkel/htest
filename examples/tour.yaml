@@ -1,0 +1,156 @@
+# A guided tour of the local demo app in ../demo — the reference example.
+#
+# It runs entirely against self-contained pages over file://, so it never
+# touches the network or a live site. Run it slow, in a visible browser, to
+# watch every feature execute:
+#
+#   geckodriver --port 4444 &
+#   htest run examples/tour.yaml --driver webdriver --browser firefox --keep-going --shot-on-fail
+#
+# --keep-going matters: the `broken` task fails on purpose to show that the run
+# continues and `finish` still executes.
+#
+# BASE_URL / AVATAR are relative paths, not machine-specific absolute ones, so
+# the tour runs from any checkout on any machine — no editing required.
+
+id: tour
+
+vars:
+  # Folder that holds the demo pages, as a relative file:// URL. Relative
+  # locations resolve against the directory you run htest from, falling back to
+  # this manifest's own directory (which is what `../demo` is relative to here,
+  # so the tour also works when run from outside the repo). Either way htest
+  # expands them to an absolute file:// URL at load time.
+  BASE_URL: "file://../demo"
+  # A real file for the form's file picker, resolved the same way. `upload`
+  # hands the driver the resolved absolute path.
+  AVATAR: "../demo/assets/sample.txt"
+
+tasks:
+  # 1. Land on the home page.
+  - name: home
+    steps:
+      - goto: "{{ BASE_URL }}/index.html"
+      - wait_for: "#home-title"
+      - assert: { selector: "#home-title", text: "htest playground" }
+      - wait: 800
+      - screenshot: "tour-01-home.png"
+
+  # 2. Click around the nav bar and confirm each page loads.
+  - name: navigate
+    needs: [home]
+    steps:
+      - goto: "{{ BASE_URL }}/index.html"
+      - click: "#nav-popup"
+      - wait_for: "#open-popup"
+      - wait: 600
+      - click: "#nav-form"
+      - wait_for: "#name"
+      - wait: 600
+      - click: "#nav-snake"
+      - wait_for: "#grid"
+      - wait: 600
+      - click: "#nav-home"
+      - wait_for: "#home-title"
+      - wait: 600
+
+  # 3. Open a modal popup, then close it (present -> absent).
+  - name: popup
+    needs: [navigate]
+    steps:
+      - goto: "{{ BASE_URL }}/popup.html"
+      - wait: 500
+      - click: "#open-popup"
+      - wait_for: "#popup"
+      - assert: { selector: "#popup-text", text: "Hello from the popup!" }
+      - wait: 900
+      - click: "#close-popup"
+      - wait_for: { selector: "#popup", until: absent }
+      - wait: 600
+
+  # 4. Trigger a spinner and wait for it to clear before checking the result.
+  - name: spinner
+    needs: [popup]
+    steps:
+      - goto: "{{ BASE_URL }}/spinner.html"
+      - wait: 500
+      - click: "#load"
+      - wait_for: { selector: "#spinner", until: absent, timeout: 5000 }
+      - assert: { selector: "#result", text: "Data loaded" }
+      - wait: 800
+
+  # 5. Fill a whole form (text, checkbox, radio, file) and check the summary.
+  - name: form
+    needs: [spinner]
+    steps:
+      - goto: "{{ BASE_URL }}/form.html"
+      - wait: 500
+      - fill: { selector: "#name", value: "Ada Lovelace" }
+      - fill: { selector: "#email", value: "ada@example.com" }
+      - fill: { selector: "#bio", value: "Testing htest end to end." }
+      - click: "#subscribe"
+      - click: "#plan-pro"
+      - upload: { selector: "#avatar", path: "{{ AVATAR }}" }
+      - wait: 700
+      - click: "#submit"
+      - wait_for: "#summary"
+      - assert: { selector: "#sum-name", text: "Ada Lovelace" }
+      - assert: { selector: "#sum-plan", text: "pro" }
+      - assert: { selector: "#sum-subscribed", text: "yes" }
+      - assert: { selector: "#sum-file", text: "sample.txt" }
+      - wait: 900
+      - screenshot: "tour-05-form.png"
+
+  # 6. Play checkbox snake: tick exactly the winning path.
+  - name: snake
+    needs: [form]
+    steps:
+      - goto: "{{ BASE_URL }}/snake.html"
+      - wait: 500
+      - click: "#cb-0-0"
+      - wait: 250
+      - click: "#cb-0-1"
+      - wait: 250
+      - click: "#cb-0-2"
+      - wait: 250
+      - click: "#cb-1-2"
+      - wait: 250
+      - click: "#cb-2-2"
+      - wait: 250
+      - click: "#cb-2-3"
+      - wait: 250
+      - click: "#cb-2-4"
+      - wait_for: "#snake-win"
+      - assert: { selector: "#snake-win", text: "You win!" }
+      - wait: 900
+      - screenshot: "tour-06-snake.png"
+
+  # 7. Reach a button far below the fold — WebDriver scrolls it into view.
+  - name: scroll
+    needs: [snake]
+    steps:
+      - goto: "{{ BASE_URL }}/scroll.html"
+      - wait: 500
+      - click: "#bottom-btn"
+      - wait_for: "#reached"
+      - assert: { selector: "#reached", text: "Reached the bottom!" }
+      - wait: 800
+
+  # 8. Fail on purpose. With --keep-going the run continues; --shot-on-fail
+  #    leaves FAIL-tour-broken.png so you can see the page at the failure.
+  - name: broken
+    needs: [scroll]
+    steps:
+      - goto: "{{ BASE_URL }}/index.html"
+      - assert: { selector: "#this-element-does-not-exist", exists: true }
+
+  # 9. Runs regardless of `broken` (it doesn't depend on it) — proof the tour
+  #    keeps going after a failure.
+  - name: finish
+    needs: [scroll]
+    steps:
+      - goto: "{{ BASE_URL }}/index.html"
+      - wait_for: "#home-title"
+      - assert: { selector: "#home-title", text: "htest playground" }
+      - wait: 600
+      - screenshot: "tour-09-finish.png"

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htest — WebDriver integration test runner</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html" class="active">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+        <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <section class="hero">
+        <span class="pill">Rust · WebDriver · YAML</span>
+        <h1>Integration tests you can read</h1>
+        <p class="lead">htest runs browser integration tests defined as YAML manifests — ansible/drill style. It builds a run graph from task prerequisites, runs in dependency order, and makes reruns safe with idempotent tasks.</p>
+        <a class="btn" href="getting-started.html">Get started →</a>
+        <a class="btn secondary" href="tutorial.html">Follow the tutorial</a>
+      </section>
+
+      <p>Two mantras drive the design: <strong>speed</strong> (eager page loads, batched DOM queries, implicit waits instead of fixed sleeps) and <strong>repeatability</strong> (idempotency gates, deterministic ordering, sessions always closed cleanly).</p>
+
+      <pre><code># A whole test, top to bottom
+tasks:
+  - name: homepage_loads
+    steps:
+      - goto: "https://example.com"
+      - wait_for: "h1"
+      - assert: { selector: "h1", exists: true }
+      - screenshot: "home.png"</code></pre>
+
+      <div class="cards">
+        <a class="card" href="getting-started.html">
+          <h3>Getting started</h3>
+          <p>Build it, run the mock backend, then drive a real browser in three steps.</p>
+        </a>
+        <a class="card" href="tutorial.html">
+          <h3>Tutorial</h3>
+          <p>Build a real multi-step test end to end: navigate, act, assert, chain tasks, loop over data.</p>
+        </a>
+        <a class="card" href="actions.html">
+          <h3>Actions &amp; steps</h3>
+          <p>Every step type — <code>goto</code>, <code>click</code>, <code>fill</code>, <code>upload</code>, <code>assert</code>, <code>wait_for</code> — with examples.</p>
+        </a>
+        <a class="card" href="selectors.html">
+          <h3>Selectors</h3>
+          <p>Plain CSS vs. hierarchical text-scoped selectors — target the button on Alice's row.</p>
+        </a>
+        <a class="card" href="waits.html">
+          <h3>Waits &amp; timing</h3>
+          <p><code>wait</code> vs <code>wait_for</code>, implicit waits, and why pages feel fast.</p>
+        </a>
+        <a class="card" href="screenshots.html">
+          <h3>Screenshots</h3>
+          <p>Capture on purpose, or automatically on every failure.</p>
+        </a>
+        <a class="card" href="loops.html">
+          <h3>Loops</h3>
+          <p>Repeat a task over a range or a list — five users, one task, expanded before the run.</p>
+        </a>
+        <a class="card" href="playbooks.html">
+          <h3>Playbooks</h3>
+          <p>Collect suites into one CI run: shared settings, file-level ordering, a managed driver.</p>
+        </a>
+      </div>
+
+      <h2>What's in the box</h2>
+      <ul>
+        <li><strong>YAML manifests</strong> — steps, prerequisites, idempotency, variables.</li>
+        <li><strong>Run graph</strong> — topological order from <code>needs</code>; cycles rejected up front.</li>
+        <li><strong>Two backends</strong> — a deterministic <em>mock</em> for developing manifests, and a real <em>WebDriver</em> backend (Firefox/Chrome).</li>
+        <li><strong>Hierarchical selectors</strong> — text matching and scoped descent that plain CSS can't express.</li>
+        <li><strong>Implicit waits</strong> — no flaky fixed sleeps; poll until the condition holds.</li>
+        <li><strong>Loops</strong> — <code>loop:</code> repeats a task over a range or list, expanded into real tasks at load time.</li>
+        <li><strong>Multi-file + cross-file deps</strong> — split suites across files, depend across them.</li>
+        <li><strong>Playbooks</strong> — one CI file collects suites, sets shared settings, and can own the driver.</li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a href="getting-started.html">Getting started →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

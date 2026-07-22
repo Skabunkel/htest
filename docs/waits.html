@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waits &amp; timing · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html" class="active">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+      <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Waits &amp; timing</h1>
+      <p class="lead">Web pages settle asynchronously. htest's timing model keeps tests fast <em>and</em> race-free without you sprinkling guesses.</p>
+
+      <h2>The problem with fixed sleeps</h2>
+      <p>A fixed <code>wait: 500</code> is a guess. Too short and the test is flaky; too long and every run pays the cost. Real integration tests need to wait for <em>conditions</em>, not clocks.</p>
+
+      <h2>Implicit waits (automatic)</h2>
+      <p>You mostly don't have to wait at all. htest re-checks conditions for you, polling every 150&nbsp;ms until they hold or the <code>--timeout</code> budget (default 5&nbsp;s) runs out:</p>
+      <ul>
+        <li><strong>Before <code>click</code>/<code>fill</code></strong> — it waits for the target element to appear.</li>
+        <li><strong>On <code>assert</code></strong> — it polls until presence matches your expectation. <code>exists: true</code> waits for the element to <em>appear</em>; <code>exists: false</code> waits for it to <em>disappear</em> (so "row gone after delete" is race-free).</li>
+        <li><strong>On <code>assert … text:</code></strong> — it polls until the text matches too.</li>
+      </ul>
+      <pre><code># No wait needed — the assert polls until #dashboard shows up.
+- click: "#submit"
+- assert: { selector: "#dashboard", exists: true }</code></pre>
+
+      <h2>Fast page loads</h2>
+      <p>The WebDriver backend uses <code>pageLoadStrategy: eager</code>, so <code>goto</code> returns at DOMContentLoaded instead of blocking until every image, ad, and tracker finishes. Page load is rarely the bottleneck; anything still settling is covered by the implicit wait above.</p>
+
+      <h2><code>wait</code> — a fixed pause</h2>
+      <p>An unconditional sleep in milliseconds. It always waits the full duration. Use it only when you genuinely need a fixed delay (e.g. a timed animation with no DOM signal to key off).</p>
+      <pre><code>- wait: 250        # sleep 250ms, unconditionally</code></pre>
+
+      <h2><code>wait_for</code> — wait for a condition</h2>
+      <p>Block until a selector reaches a state, then continue immediately. This is the one to reach for. On timeout the task <strong>fails</strong> — that's the point: it asserts the condition eventually happens.</p>
+      <pre><code>- wait_for: "#ready"                                    # until present (shorthand)
+- wait_for: { selector: ".spinner", until: absent }     # until it disappears
+- wait_for: { selector: ".report", until: present, timeout: 15000 }  # per-step budget</code></pre>
+
+      <table>
+        <thead><tr><th>Field</th><th>Default</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>selector</code></td><td>—</td><td>What to watch (plain CSS string or structured form).</td></tr>
+          <tr><td><code>until</code></td><td><code>present</code></td><td><code>present</code> = wait until it resolves; <code>absent</code> = wait until it resolves to nothing.</td></tr>
+          <tr><td><code>timeout</code></td><td><code>--timeout</code></td><td>Per-step override of the wait budget, in milliseconds.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>The spinner pattern</h3>
+      <p><code>until: absent</code> is how you wait out a loading indicator before checking results:</p>
+      <pre><code>- click: "#load-report"
+- wait_for: { selector: ".spinner", until: absent, timeout: 15000 }
+- assert: { selector: ".report", exists: true }</code></pre>
+
+      <h2>Which one do I use?</h2>
+      <table>
+        <thead><tr><th>Situation</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr><td>Assert something is / becomes true</td><td>Just <code>assert</code> — it already polls.</td></tr>
+          <tr><td>Click/fill an element that appears late</td><td>Nothing — the implicit wait covers it.</td></tr>
+          <tr><td>Wait for a spinner/overlay to clear</td><td><code>wait_for: { until: absent }</code></td></tr>
+          <tr><td>Wait for async content before acting on it</td><td><code>wait_for: { until: present }</code></td></tr>
+          <tr><td>A slow endpoint blows the 5&nbsp;s budget</td><td>Raise <code>--timeout</code>, or set a per-step <code>timeout</code>.</td></tr>
+          <tr><td>A fixed, signal-less delay (rare)</td><td><code>wait: &lt;ms&gt;</code></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>Rule of thumb:</strong> prefer <code>wait_for</code> over <code>wait</code>. A condition-based wait is as fast as the page allows and fails loudly when the condition never happens; a fixed sleep is either too slow or too flaky.
+      </div>
+
+      <div class="pager">
+        <a href="selectors.html">← Selectors</a>
+        <a href="screenshots.html">Screenshots →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
