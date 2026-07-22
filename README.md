@@ -15,6 +15,7 @@ Full guide in [`docs/`](docs/README.md) — also a styled HTML site
 
 - [Getting started](docs/getting-started.md) — build, mock, real browser, flags, troubleshooting
 - [Tutorial](docs/tutorial.md) — build a multi-step test end to end
+- [Actions & steps](docs/actions.md) — every step type: `goto`, `click`, `fill`, `upload`, `assert`, `wait`/`wait_for`, `screenshot`
 - [Selectors](docs/selectors.md) — plain CSS vs. hierarchical text-scoped selectors
 - [Waits & timing](docs/waits.md) — `wait` vs `wait_for`, implicit waits
 - [Screenshots](docs/screenshots.md) — the `screenshot` step and `--shot-on-fail`
