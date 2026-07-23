@@ -1,8 +1,10 @@
 # Playbooks
 
-A manifest is a suite of tasks — the base unit you build on. A *playbook*
-collects several suites, sets run-wide settings once, and orders them. In CI you
-point at one file.
+A manifest is a *suite* of tasks — the base unit you build on. A **playbook** is
+the layer above: it collects several suites into one run, sets the run-wide
+settings once, and orders the suites relative to each other. The payoff is a
+single entry point — CI (or you) points at one file and gets the whole test run,
+configured consistently:
 
 ```bash
 htest playbook examples/ci.playbook.yaml
@@ -10,7 +12,9 @@ htest playbook examples/ci.playbook.yaml
 
 ## Shape
 
-Two top-level keys: `settings` (optional) and `suites` (required).
+A playbook has just two top-level keys: `settings` (optional) and `suites`
+(required). `settings` configures the whole run; `suites` lists the manifests to
+run and how they depend on each other.
 
 ```yaml
 settings:
@@ -27,27 +31,37 @@ suites:
     needs: [auth.yaml]     # all of auth.yaml before any of reporting.yaml
 ```
 
+The rest of the page walks down from here: first the `suites` list and how
+cross-file ordering works, then `settings` and where their values come from, and
+finally the two settings that most change how a CI run behaves — the managed
+driver and the wall-clock cap.
+
 ## Suites & file-level `needs`
 
-Each entry under `suites` is a manifest `file` (path relative to the playbook's
-own directory). Its optional `needs` lists *other suite files* that must finish
-first.
+Each entry under `suites` names a manifest `file` (resolved relative to the
+playbook's *own* directory, not your working directory). Its optional `needs`
+lists *other suite files* that must finish before this one starts.
 
-`needs` is **file-level**: every task in a needed suite becomes a prerequisite
-of every task in the dependent suite — "all of A before all of B". This is
-coarser than a manifest's per-task `needs` (`namespace:task`), and the two
-compose: task-level edges within files still hold, and the playbook adds the
-cross-file ones. Any cycle you create is caught before the run starts.
+The important thing to understand is that this `needs` is **file-level**, coarser
+than the per-task `needs` inside a manifest. When suite B needs suite A, *every*
+task in A becomes a prerequisite of *every* task in B — "all of A before all of
+B". The two levels compose cleanly: the task-level edges *within* each file still
+hold exactly as written, and the playbook simply adds these cross-file edges on
+top. Any cycle you introduce across files is caught before the run starts.
 
-> A suite's namespace is its manifest's top-level `id:` (falling back to the
-> file stem). Two suites with the same namespace is an error — give each a
-> distinct `id:`.
+> A suite's namespace is its manifest's top-level `id:` (falling back to the file
+> stem if there is no `id:`). This namespace is how tasks are reported and
+> referenced, so two suites resolving to the *same* namespace is an error — give
+> each a distinct `id:`.
 
 ## Settings & precedence
 
-Settings layer in one direction: **CLI flag > playbook `settings` > built-in
-default**. Any flag you pass to `htest playbook` overrides the same field in the
-file, so one playbook serves both local and CI runs.
+`settings` in the file is only one of three layers. They resolve in one
+direction — **CLI flag > playbook `settings` > built-in default** — so a value
+you pass on the command line always wins, and a field you set nowhere falls back
+to its default. That is what lets a single playbook serve both local and CI runs:
+keep the file configured for local work and override just the CI-specific fields
+at the command line.
 
 ```bash
 # Playbook says driver: mock; force a real headless Firefox for CI:
@@ -74,10 +88,12 @@ htest playbook ci.playbook.yaml --driver webdriver --browser firefox --headless 
 
 ## Managed driver
 
-Set `manage_driver: true` (with `driver: webdriver`) and htest starts the driver
-for you — `geckodriver` for Firefox, `chromedriver` for Chrome — waits for its
-port to accept connections, and kills it when the run ends. No separate "start
-the driver" step in your CI job.
+By default you are responsible for having a WebDriver running before htest
+connects. Setting `manage_driver: true` (with `driver: webdriver`) hands that job
+to htest instead: it starts the right driver for your browser — `geckodriver`
+for Firefox, `chromedriver` for Chrome — waits for its port to accept
+connections, and kills it when the run ends. That removes the separate "start the
+driver" step from your CI job.
 
 ```yaml
 settings:
@@ -88,19 +104,23 @@ settings:
   driver_path: geckodriver    # optional; else found on PATH
 ```
 
-The session is always closed before the driver process is killed, so no browser
-is left orphaned between runs.
+Shutdown is ordered carefully: the browser session is always closed *before* the
+driver process is killed, so a run never leaves an orphaned browser behind
+between invocations.
 
 ## Failing the whole run on time
 
-`max_run_time` is a global wall-clock budget in seconds, checked between tasks.
-If the run exceeds it, every remaining task is marked failed with a "run aborted"
-reason — so a hung suite can't stall a CI job indefinitely.
+A hung page or a driver that stops responding could otherwise stall a CI job
+indefinitely. `max_run_time` is the guard: a global wall-clock budget in seconds,
+checked *between* tasks. Once the elapsed time exceeds it, every remaining task
+is marked failed with a "run aborted" reason rather than being attempted — so the
+run always terminates and reports.
 
 ## Exit code
 
-Like `htest run`, the process exits non-zero if any task failed — the single
-signal a CI pipeline needs.
+Finally, the signal CI actually consumes. Like `htest run`, the `htest playbook`
+process exits non-zero if any task failed — one bit that tells the pipeline
+whether to go green or red.
 
 ---
 

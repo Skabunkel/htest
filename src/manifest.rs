@@ -58,8 +58,16 @@ pub struct Task {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Idempotent {
-    /// Predicate evaluated before any step runs.
+    /// Optional steps run against the live page **before** `check` — navigate,
+    /// type into a filter, click search — so the predicate can inspect a
+    /// searched/filtered result rather than a single static snapshot. Reuses
+    /// the ordinary `Step` machinery (implicit waits included). Empty by
+    /// default, which keeps the plain "one snapshot" gate.
+    #[serde(default)]
+    pub probe: Vec<Step>,
+    /// Predicate evaluated (after any `probe` steps) before the task's steps.
     pub check: Check,
     /// What to do when the predicate is satisfied (resource already exists).
     #[serde(default)]
@@ -106,6 +114,23 @@ pub enum Step {
     Wait(u64),
     /// Wait until a selector is present/absent (spinners, async content).
     WaitFor(WaitForArgs),
+}
+
+impl Step {
+    /// Short, human-readable label naming the action and its target — used to
+    /// pinpoint *which* step failed in an error message (e.g. `click `#submit``).
+    pub fn describe(&self) -> String {
+        match self {
+            Step::Goto(u) => format!("goto {u:?}"),
+            Step::Click(s) => format!("click `{s}`"),
+            Step::Fill(f) => format!("fill `{}`", f.selector),
+            Step::Upload(u) => format!("upload `{}` <- {:?}", u.selector, u.path),
+            Step::Assert(a) => format!("assert `{}`", a.selector),
+            Step::Screenshot(n) => format!("screenshot {n:?}"),
+            Step::Wait(ms) => format!("wait {ms}ms"),
+            Step::WaitFor(w) => format!("wait_for `{}`", w.selector),
+        }
+    }
 }
 
 // Custom deserialize: serde_yaml renders externally-tagged enums as `!tags`,

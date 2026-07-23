@@ -20,6 +20,8 @@
       <a href="selectors.html" class="active">Selectors</a>
       <a href="waits.html">Waits &amp; timing</a>
       <a href="screenshots.html">Screenshots</a>
+      <a href="idempotency.html">Idempotency &amp; checks</a>
+      <a href="variables.html">Variables &amp; formatting</a>
       <a href="loops.html">Loops</a>
     <a href="playbooks.html">Playbooks</a>
     </nav>
@@ -28,18 +30,41 @@
   <main class="content">
     <div class="inner">
       <h1>Selectors</h1>
-      <p class="lead">How htest finds elements. A selector is either a plain CSS string, or a structured hierarchical form that adds what CSS can't express.</p>
+      <p class="lead">A selector is how htest points at an element on the page. There are two forms, and they build on each other: a plain CSS string, which is the foundation and covers most cases, and a structured hierarchical form that layers on the two things CSS cannot do — matching by text, and scoping a search inside an earlier match. This page starts with plain CSS and works up to the structured form and its finer points.</p>
 
       <h2>Plain CSS</h2>
-      <p>Anywhere a step takes a selector, a bare string is a CSS selector, passed straight through. All combinators work — this <em>is</em> hierarchy.</p>
+      <p>Anywhere a step takes a selector, a bare string is treated as a CSS selector and passed straight to the driver. Nothing is added or reinterpreted, so the full CSS vocabulary is available — including every combinator. Descendant (<code>.a .b</code>), child (<code>.a &gt; .b</code>), sibling, <code>:nth-child</code>, and the rest all work, which means plain CSS <em>already</em> expresses hierarchy.</p>
       <pre><code>click: "#submit"
 click: ".tables button"        # a button anywhere inside .tables
 click: ".tables > tr > .del"   # child combinator
 assert: { selector: "nav .user-menu", exists: true }</code></pre>
-      <p>Reach for CSS whenever the target is uniquely addressable by structure/classes/ids. It's the fastest path — one query, no text scan.</p>
+      <p>Reach for plain CSS whenever the target is uniquely addressable by its structure, classes, or ids. It is the fastest path htest has: a single query against the DOM, with no scanning of element text.</p>
+
+      <h3>Attribute selectors (generated ids)</h3>
+      <p>Modern frameworks often emit ids like <code>Email_a1b2c3</code> — a stable prefix followed by a random, per-render suffix. Hard-coding <code>#Email_a1b2c3</code> is fragile because it won't survive the next render, and a structural selector such as <code>.container &gt; .value &gt; span &gt; input</code> is too broad because it matches every input on the page (28 of them, say). CSS <strong>attribute operators</strong> pin exactly the one you want by matching the <em>stable part</em> of the attribute, with no fuzzy guessing:</p>
+      <pre><code># id STARTS WITH "Email_"     (^=)
+click: '.container &gt; .value &gt; span &gt; input[id^="Email_"]'
+
+# id CONTAINS "Email"         (*=)
+click: '.container &gt; .value &gt; span &gt; input[id*="Email"]'
+
+# id ENDS WITH "_email"       ($=)
+fill:
+  selector: 'input[id$="_email"]'
+  value: "user@example.com"</code></pre>
+      <table>
+        <thead><tr><th>Operator</th><th>Matches when the attribute…</th></tr></thead>
+        <tbody>
+          <tr><td><code>[id^="Email_"]</code></td><td>starts with <code>Email_</code></td></tr>
+          <tr><td><code>[id*="Email"]</code></td><td>contains <code>Email</code> anywhere</td></tr>
+          <tr><td><code>[id$="_email"]</code></td><td>ends with <code>_email</code></td></tr>
+          <tr><td><code>[name="email"]</code></td><td>equals <code>email</code> exactly</td></tr>
+        </tbody>
+      </table>
+      <p>These operators work on <em>any</em> attribute, not just <code>id</code> — <code>[name^=…]</code>, <code>[data-test*=…]</code>, and so on. Quote the whole selector in YAML so the <code>[</code> and <code>"</code> characters aren't misread by the parser. And if several elements still match after this, you have two ways to disambiguate: add a CSS pseudo-class like <code>:nth-of-type(n)</code>, or step up to the structured form below and use its <code>nth</code> field.</p>
 
       <h2>Structured (hierarchical) form</h2>
-      <p>CSS cannot match on <em>text content</em>, and cannot say "descend into this match, then find that." The structured form adds both.</p>
+      <p>Two needs push past what CSS can express: matching an element by its <strong>text content</strong>, and saying "find <em>this</em>, then descend into it and find <em>that</em>." The structured form adds exactly those. Instead of a string, you write a small map whose fields describe one level of the search; <code>find</code> lets a level nest another inside it.</p>
       <pre><code>selector:
   css: ".row"           # match at this level (default: any element)
   contains: "Alice"     # keep only elements whose text contains this
@@ -52,26 +77,37 @@ assert: { selector: "nav .user-menu", exists: true }</code></pre>
       <table>
         <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
         <tbody>
-          <tr><td><code>css</code></td><td>CSS to match at this level. Omit to match any element.</td></tr>
+          <tr><td><code>css</code></td><td>CSS to match at this level. Omit to match any element (<code>*</code>).</td></tr>
           <tr><td><code>contains</code></td><td>Keep only elements whose text <em>contains</em> this substring (case-sensitive).</td></tr>
           <tr><td><code>text</code></td><td>Keep only elements whose trimmed text <em>equals</em> this exactly.</td></tr>
           <tr><td><code>nth</code></td><td>Pick the Nth surviving match (0-based). Default: the first.</td></tr>
           <tr><td><code>find</code></td><td>A nested selector, resolved <em>inside</em> each match. Nests to any depth.</td></tr>
         </tbody>
       </table>
+      <p>Only these fields are accepted; an unknown key is rejected rather than ignored, so a typo like <code>contain:</code> is caught immediately instead of silently matching nothing.</p>
 
       <h2>Nesting with <code>find</code></h2>
-      <p><code>find</code> is the "descend into" operator. It takes another selector and resolves it <strong>inside</strong> each element the current level matched — not against the whole document. So the outer selector picks a <em>scope</em>, and <code>find</code> searches only within it.</p>
-      <p>The map form can be written inline on one line:</p>
+      <p><code>find</code> is the "descend into" operator, and it is what makes the structured form <em>hierarchical</em>. It takes another full selector and resolves it <strong>inside</strong> each element the current level matched — not against the whole document. So the outer selector chooses a <em>scope</em>, and <code>find</code> searches only within that scope. Because each <code>find</code> is itself a complete structured selector, it can nest again.</p>
+      <p>The map form can be written inline on a single line:</p>
       <pre><code># "the Delete button inside the &lt;tr&gt; whose text contains Alice"
 click: { css: "tr", contains: "Alice", find: { css: "button", text: "Delete" } }</code></pre>
-      <p>Read it left to right: match every <code>tr</code> → keep the one containing "Alice" → descend into that row → find the <code>button</code> whose text is exactly "Delete".</p>
+      <p>Read it left to right: match every <code>tr</code> → keep the one whose text contains "Alice" → descend into that row → find the <code>button</code> whose text is exactly "Delete".</p>
 
       <h3>Why not just CSS?</h3>
-      <p>A CSS descendant combinator (<code>tr button</code>) also descends, but it can't filter by <strong>text</strong> at either level. <code>find</code> can — each level is a full structured selector, so you can pin the row by its text <em>and</em> the button by its text. Use plain CSS when structure alone is enough; reach for <code>find</code> the moment text disambiguates a level.</p>
+      <p>A CSS descendant combinator (<code>tr button</code>) also descends — but it can only filter by structure, never by <strong>text</strong>, at either end. <code>find</code> can filter by text at every level, because each level is a full structured selector: you can pin the row by the name it contains <em>and</em> the button by its label. The rule of thumb: use plain CSS when structure alone uniquely identifies the target, and reach for <code>find</code> the moment text is what disambiguates a level.</p>
+
+      <h3>The classic example</h3>
+      <p>The motivating case is "click the Delete button on Alice's row." Plain CSS can't express it, because every row has an identical Delete button and nothing structural separates Alice's. The structured form reads exactly as you'd say it out loud:</p>
+      <pre><code>click:
+  css: ".row"                       # every row...
+  contains: "Alice"                 # ...keep the one containing "Alice"...
+  find:                             # ...then, inside it,
+    css: "button"                   # the button...
+    contains: "Delete"              # ...that says Delete.</code></pre>
+      <p>This example is verified live in <code>examples/fixtures.yaml</code>.</p>
 
       <h3>Nesting deeper</h3>
-      <p><code>find</code> nests to any depth — each level scopes the next. Combine with <code>nth</code> to pick among siblings at any level.</p>
+      <p><code>find</code> nests to any depth — each level scopes the one below it — and combines with <code>nth</code> to pick among siblings at whatever level they appear. That lets you walk several containers deep while staying anchored the whole way down:</p>
       <pre><code># Inside the "Billing" card, inside its second row, click the "Edit" link.
 click:
   css: ".card"
@@ -82,40 +118,30 @@ click:
     find:
       css: "a"
       text: "Edit"            # ...the Edit link within.</code></pre>
-      <p>Each level runs the full resolution order below before handing its match(es) to the next <code>find</code>.</p>
+      <p>Every level runs the full resolution order below before handing its match on to the next <code>find</code>.</p>
 
       <h2>Resolution order</h2>
-      <p>At each level, htest applies the fields in a fixed order:</p>
+      <p>Within a single level, the fields never fight over precedence: htest always applies them in one fixed order, so the result is predictable no matter how you write the map.</p>
       <blockquote>CSS match → text filter (<code>contains</code>/<code>text</code>) → <code>nth</code> pick → descend via <code>find</code></blockquote>
-
-      <h2>The classic example</h2>
-      <p>"Click the Delete button on Alice's row." Plain CSS can't target it — there's a Delete button on every row. The structured form can:</p>
-      <pre><code>click:
-  css: ".row"                       # every row...
-  contains: "Alice"                 # ...keep the one containing "Alice"...
-  find:                             # ...then, inside it,
-    css: "button"                   # the button...
-    contains: "Delete"              # ...that says Delete.</code></pre>
-      <p>This reads exactly as intended and is verified live in <code>examples/fixtures.yaml</code>.</p>
+      <p>In words: first the <code>css</code> narrows the candidates, then the text filter keeps only those whose text matches, then <code>nth</code> selects one of the survivors, and finally <code>find</code> descends into it. Knowing this order is what lets you reason about a selector like the Billing example above with confidence.</p>
 
       <h2><code>contains</code> vs <code>text</code></h2>
-      <p><code>contains</code> is a substring test; <code>text</code> is an exact (trimmed) equality test. Prefer <code>text</code> when a substring would be ambiguous:</p>
+      <p>Both filter by text, but they differ in strictness, and the choice matters. <code>contains</code> is a <em>substring</em> test; <code>text</code> is an <em>exact</em>, trimmed-equality test. Prefer <code>text</code> whenever a substring could be ambiguous — a shorter title is often a prefix of a longer one:</p>
       <pre><code># DANGER: "Sailor Moon" also matches "Sailor Moon R", "Sailor Moon S"...
 click: { css: "#bodyContent a", contains: "Sailor Moon" }
 
 # SAFE: only the link whose text is exactly "Sailor Moon"
 click: { css: "#bodyContent a", text: "Sailor Moon" }</code></pre>
 
-      <div class="callout">
-        <strong>Performance:</strong> text matching (<code>contains</code>/<code>text</code>) has to read the text of every element the CSS matched. On a link-heavy page, <code>css: "a"</code> can mean thousands of candidates. htest fetches all their text in a single round trip, but you'll still go faster by narrowing the CSS first — scope to the region that holds the target.
-        <pre><code># slow: every &lt;a&gt; on the page considered
+      <h2>Performance</h2>
+      <p>Text matching is not free, so it pays to understand the cost. To apply <code>contains</code> or <code>text</code>, htest must read the text of <em>every</em> element the CSS matched — on a link-heavy page, <code>css: "a"</code> can mean thousands of candidates. htest fetches all of that text in a single round trip to the browser, so the network overhead is fixed rather than per-element, but you'll still go faster by narrowing the CSS first so there are fewer candidates to read in the first place.</p>
+      <pre><code># slow: every &lt;a&gt; on the page considered
 click: { css: "a", text: "Next" }
 # fast: only anchors inside the pager
 click: { css: "#pager a", text: "Next" }</code></pre>
-      </div>
 
       <h2>Where selectors are used</h2>
-      <p>Everywhere an element is referenced: <code>click</code>, <code>fill.selector</code>, <code>assert.selector</code>, <code>wait_for</code> (and its <code>selector</code>), and the idempotency <code>check.selector</code>. The same two forms work in all of them.</p>
+      <p>Both forms — plain CSS and structured — are accepted identically everywhere htest references an element: the <a href="actions.html"><code>click</code></a> and <a href="actions.html"><code>fill</code></a> steps (the latter via <code>fill.selector</code>), <code>upload.selector</code>, <code>assert.selector</code>, <a href="waits.html"><code>wait_for</code></a> (its shorthand string and its <code>selector</code> field), and the idempotency <code>check.selector</code>. Learn the two forms once and they apply across the whole manifest.</p>
 
       <div class="pager">
         <a href="actions.html">← Actions &amp; steps</a>

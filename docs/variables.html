@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Variables &amp; formatting · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+      <a href="idempotency.html">Idempotency &amp; checks</a>
+      <a href="variables.html" class="active">Variables &amp; formatting</a>
+      <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Variables &amp; formatting</h1>
+      <p class="lead">A manifest is a <strong>template first and YAML second</strong>. Before htest parses a single line of structure, it renders the whole document once — every <code>{{ VAR }}</code> is replaced with text — and only then reads the result as YAML. That ordering is the key to the whole page: because substitution happens <em>before</em> parsing, a placeholder is just text and can appear <em>anywhere</em> — step values, selectors, <code>needs</code>, screenshot names, even the <code>idempotent</code> check.</p>
+
+      <p>htest templates with <a href="https://docs.rs/minijinja">minijinja</a> (a Jinja2 dialect) in strict mode. This page starts with where the values come from, then works up from the single most important fact — every value is a string — to the filters that reshape those strings at the point of use: zero-pad a number, fix a width, force a case, supply a default.</p>
+
+      <h2>Where values come from</h2>
+      <p>Before rendering, htest assembles a single context — a flat set of name-to-string pairs — from three sources. They are layered <strong>low → high</strong> precedence, so when the same name appears in more than one, the <strong>later (higher) source wins</strong>:</p>
+      <table>
+        <thead><tr><th>Source</th><th>Example</th><th>Precedence</th></tr></thead>
+        <tbody>
+          <tr><td>Process environment</td><td><code>BASE_URL=… htest run …</code></td><td>lowest</td></tr>
+          <tr><td><code>.env</code> file</td><td><code>--env ci.env</code>, manifest <code>env:</code>, or <code>./.env</code></td><td>middle</td></tr>
+          <tr><td>Manifest <code>vars:</code></td><td>the <code>vars:</code> block at the top of the file</td><td><strong>highest</strong></td></tr>
+        </tbody>
+      </table>
+      <p>The <code>.env</code> file itself is chosen with the same "later wins" idea: an explicit <code>--env</code> on the command line beats the manifest's own <code>env:</code> key, which in turn beats a plain <code>./.env</code> sitting next to the manifest.</p>
+      <pre><code>vars:
+  BASE_URL: "https://example.com"
+  USERNAME: "alice"
+tasks:
+  - name: open
+    steps:
+      - goto: "{{ BASE_URL }}/users/{{ USERNAME }}"</code></pre>
+      <p>Because <code>vars:</code> sits at the top, it is the natural place to pin a value for the run; leave a name out of <code>vars:</code> when you want an environment variable or <code>.env</code> file to be able to set it. Inside a <a href="loops.html">loop</a> there is one more, even higher layer: the loop variable (<code>item</code>/<code>n</code>, plus <code>loop_index</code> and <code>loop_index1</code>) sits on top of this context for that one task.</p>
+      <blockquote><strong>Strict mode.</strong> A name that no source defines is a <strong>hard error</strong>, never a silent blank — <code>missing variable ...</code>. That is deliberate: a typo fails the run immediately instead of quietly filling in an empty string. When a blank really is acceptable, say so explicitly with <code>|default(...)</code>.</blockquote>
+
+      <h2>Everything is a string</h2>
+      <p>This is the one fact that explains most surprises: <strong>every value arrives as a string.</strong> The three sources above are all textual — environment variables and <code>.env</code> entries are strings by nature, and even <code>vars: { N: 5 }</code> reaches the template as the string <code>"5"</code>, not the number <code>5</code>. So before any arithmetic or numeric formatting you must cast, with <code>|int</code> or <code>|float</code>:</p>
+      <pre><code>{{ N + 1 }}        # ✗ error: adding to a string
+{{ N|int + 1 }}    # ✓ 6</code></pre>
+      <p>Keep this in mind for the rest of the page: the numeric filters below all begin by casting, because the thing they receive is text.</p>
+
+      <h2>Formatting numbers — the <code>format</code> filter</h2>
+      <p>To control how a number looks — pad it, fix its width, force a sign — use the printf-style <code>format</code> filter. It takes a format spec on the left and the value on the right, so the pattern is always <em>cast first, then format</em>. <strong>In YAML, quote the whole value</strong> (it starts with <code>{</code>, which YAML would otherwise read as a flow map), and use single quotes for the spec inside:</p>
+      <pre><code>- fill: { selector: "#day", value: "{{ '%02d'|format(DAY|int) }}" }</code></pre>
+      <table>
+        <thead><tr><th>Goal</th><th>Template</th><th><code>N=5</code> →</th></tr></thead>
+        <tbody>
+          <tr><td>Leading zero, 2 digits</td><td><code>{{ '%02d'|format(N|int) }}</code></td><td><code>05</code></td></tr>
+          <tr><td>3 digits</td><td><code>{{ '%03d'|format(N|int) }}</code></td><td><code>005</code></td></tr>
+          <tr><td>Right-align, width 5 (spaces)</td><td><code>{{ '%5d'|format(N|int) }}</code></td><td><code>"&nbsp;&nbsp;&nbsp;&nbsp;5"</code></td></tr>
+          <tr><td>Left-align, width 5</td><td><code>{{ '%-5d'|format(N|int) }}</code></td><td><code>"5&nbsp;&nbsp;&nbsp;&nbsp;"</code></td></tr>
+          <tr><td>Always show sign</td><td><code>{{ '%+d'|format(N|int) }}</code></td><td><code>+5</code></td></tr>
+          <tr><td>Float, 2 decimals</td><td><code>{{ '%.2f'|format(N|float) }}</code></td><td><code>5.00</code></td></tr>
+          <tr><td>Inside a larger string</td><td><code>{{ 'user_%03d'|format(N|int) }}</code></td><td><code>user_005</code></td></tr>
+        </tbody>
+      </table>
+      <p>The width and precision rules are standard printf: <code>%0&lt;width&gt;d</code> zero-pads to a width, <code>%&lt;width&gt;d</code> space-pads to the same width, <code>%-&lt;width&gt;d</code> left-aligns instead of right, and <code>%.&lt;n&gt;f</code> fixes the number of decimals. The last row is the useful trick — a spec is a full string, so a literal prefix like <code>user_</code> can live right inside it and get padded numbers in one step.</p>
+
+      <h2>Prefixing &amp; building strings</h2>
+      <p>Formatting handles one number; building an identifier or a URL means joining several pieces. There are two complementary ways to do it:</p>
+      <pre><code># 1. concatenate with ~ (turns each side into text and joins)
+{{ 'user_' ~ N }}                       # user_5
+{{ BASE_URL ~ '/users/' ~ USERNAME }}   # https://example.com/users/alice
+
+# 2. bake the prefix into a format spec — joins AND pads in one go
+{{ 'user_%03d'|format(N|int) }}         # user_005
+
+# a conditional prefix, when you want padding only some of the time
+{{ '0' ~ N if N|int &lt; 10 else N }}      # 05 when N&lt;10, else N</code></pre>
+      <p>Reach for <code>~</code> when you are stitching text together and for <code>format</code> when a piece needs padding or a fixed width; the conditional form is the escape hatch for the in-between cases.</p>
+
+      <h2>Common string filters</h2>
+      <p>Filters transform a value at the point of use. Each one takes the value on its left and returns a new one, and they <strong>chain left to right</strong> with <code>|</code>, so <code>{{ NAME|trim|lower }}</code> trims <em>first</em> and then lowercases the result.</p>
+      <table>
+        <thead><tr><th>Filter</th><th>Template</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Uppercase</td><td><code>{{ 'abc'|upper }}</code></td><td><code>ABC</code></td></tr>
+          <tr><td>Lowercase</td><td><code>{{ 'ABC'|lower }}</code></td><td><code>abc</code></td></tr>
+          <tr><td>Title case</td><td><code>{{ 'hello world'|title }}</code></td><td><code>Hello World</code></td></tr>
+          <tr><td>Trim whitespace</td><td><code>{{ '  x  '|trim }}</code></td><td><code>x</code></td></tr>
+          <tr><td>Replace</td><td><code>{{ 'a-b-c'|replace('-', '/') }}</code></td><td><code>a/b/c</code></td></tr>
+          <tr><td>Default if undefined</td><td><code>{{ MAYBE|default('none') }}</code></td><td><code>none</code></td></tr>
+          <tr><td>Substring (slice)</td><td><code>{{ 'abcdef'[0:3] }}</code></td><td><code>abc</code></td></tr>
+          <tr><td>Absolute value</td><td><code>{{ N|int|abs }}</code></td><td><code>5</code></td></tr>
+        </tbody>
+      </table>
+      <p>Note the last row: <code>abs</code> is numeric, so it comes <em>after</em> an <code>|int</code> cast — the same cast-first discipline as the <code>format</code> filter.</p>
+
+      <h2>Worked examples</h2>
+      <p>Putting the pieces together — a zero-padded date assembled from three separate variables, and a padded, prefixed account id generated across a <a href="loops.html">loop</a>:</p>
+      <pre><code>vars:
+  YEAR: "2026"
+  MONTH: "7"
+  DAY: "3"
+tasks:
+  - name: pick_date
+    steps:
+      # zero-padded ISO date -> 2026-07-03
+      - fill:
+          selector: "#date"
+          value: "{{ YEAR }}-{{ '%02d'|format(MONTH|int) }}-{{ '%02d'|format(DAY|int) }}"
+
+  - name: create_accounts
+    loop: { var: n, from: 1, to: 12 }
+    steps:
+      # padded, prefixed id -> ACC-0001 … ACC-0012
+      - fill: { selector: "#account", value: "ACC-{{ '%04d'|format(n|int) }}" }</code></pre>
+
+      <h2>Gotchas</h2>
+      <ul>
+        <li><strong>Values are strings.</strong> Cast with <code>|int</code> / <code>|float</code> before arithmetic or numeric formatting. This is the #1 source of surprise, which is why it has its own section above.</li>
+        <li><strong>Missing = error.</strong> Strict mode fails loudly on an undefined variable rather than substituting a blank. Use <code>|default('...')</code> where an empty value is genuinely acceptable.</li>
+        <li><strong>Filters don't mutate <code>vars:</code>.</strong> They reshape the value at the point of use; the stored value the next reference sees is untouched.</li>
+        <li><strong>Not everything from Jinja is available.</strong> The <code>%</code> string operator, Python's <code>"...".format(...)</code>, and <code>rjust</code>/<code>ljust</code> are <strong>not</strong> supported — use the <code>format</code> filter (<code>{{ '%02d'|format(N|int) }}</code>) for all of these instead.</li>
+        <li><strong>Quote values that start with <code>{</code>.</strong> <code>value: {{ x }}</code> is invalid YAML (it looks like a flow map); always write <code>value: "{{ x }}"</code>.</li>
+      </ul>
+
+      <div class="pager">
+        <a href="idempotency.html">← Idempotency &amp; checks</a>
+        <a href="loops.html">Loops →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

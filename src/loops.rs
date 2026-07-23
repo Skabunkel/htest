@@ -171,9 +171,38 @@ fn empty_loop_name(
 }
 
 /// Render one task node with the given context and parse it back into a `Task`.
+///
+/// Parses from the serialized *text* rather than `serde_yaml::from_value`: only
+/// the text path carries a line/column, so a bad field reports *where* it is
+/// instead of a bare "unknown field X". The location is relative to this task's
+/// own YAML (each task is round-tripped independently), so we also name the task
+/// and echo the offending line to make it concrete.
 fn render_task(node: &Value, ctx: &BTreeMap<String, String>) -> Result<Task> {
     let rendered = render_value(node, ctx)?;
-    serde_yaml::from_value(rendered).map_err(|e| HtError::Manifest(format!("parsing task: {e}")).into())
+    let text = serde_yaml::to_string(&rendered)
+        .map_err(|e| HtError::Manifest(format!("serializing task: {e}")))?;
+    serde_yaml::from_str::<Task>(&text).map_err(|e| task_parse_error(&rendered, &text, e).into())
+}
+
+/// Build an actionable parse error for one task: which task, where, and the
+/// offending source line.
+fn task_parse_error(rendered: &Value, text: &str, e: serde_yaml::Error) -> HtError {
+    let who = rendered
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|n| format!("task `{n}`"))
+        .unwrap_or_else(|| "an unnamed task".to_string());
+
+    let mut msg = format!("parsing {who}: {e}");
+    if let Some(loc) = e.location() {
+        if let Some(line) = text.lines().nth(loc.line().saturating_sub(1)) {
+            let line = line.trim_end();
+            if !line.trim().is_empty() {
+                msg.push_str(&format!("\n    in: {}", line.trim_start()));
+            }
+        }
+    }
+    HtError::Manifest(msg)
 }
 
 /// Round-trip a YAML node through the templating engine: serialize, render,
@@ -458,6 +487,25 @@ tasks:
         let (m, _) = render_document(raw, &ctx()).unwrap();
         assert_eq!(m.tasks[0].needs, ["step[2]"]);
         assert_eq!(m.tasks[1].needs, ["step[3]"]);
+    }
+
+    #[test]
+    fn bad_field_names_the_task_and_line() {
+        // `click` takes a bare selector; wrapping it in `selector:` feeds the
+        // Selector deserializer an unknown field. The error must say which task
+        // and echo the offending line — not just "unknown field `selector`".
+        let raw = r##"
+tasks:
+  - name: create_user
+    loop: [a]
+    steps:
+      - goto: "https://example.com"
+      - click: { selector: "#submit" }
+"##;
+        let err = render_document(raw, &ctx()).unwrap_err().to_string();
+        assert!(err.contains("task `create_user`"), "{err}");
+        assert!(err.contains("unknown field `selector`"), "{err}");
+        assert!(err.contains("in:"), "{err}");
     }
 
     #[test]

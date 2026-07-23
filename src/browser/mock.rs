@@ -35,6 +35,16 @@ impl MockBrowser {
             log: Vec::new(),
         }
     }
+
+    /// Construct with an explicit absent set — avoids the shared `HTEST_MOCK_ABSENT`
+    /// env var, which would race across parallel tests.
+    #[cfg(test)]
+    pub fn with_absent<I: IntoIterator<Item = String>>(absent: I) -> Self {
+        MockBrowser {
+            absent: absent.into_iter().collect(),
+            log: Vec::new(),
+        }
+    }
 }
 
 impl Browser for MockBrowser {

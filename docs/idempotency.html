@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Idempotency &amp; checks · htest</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="index.html">htest</a>
+    <p class="tagline">Browser tests as YAML.</p>
+    <nav>
+      <a href="index.html">Overview</a>
+      <div class="group">Guide</div>
+      <a href="getting-started.html">Getting started</a>
+      <a href="tutorial.html">Tutorial</a>
+      <a href="actions.html">Actions &amp; steps</a>
+      <a href="selectors.html">Selectors</a>
+      <a href="waits.html">Waits &amp; timing</a>
+      <a href="screenshots.html">Screenshots</a>
+      <a href="idempotency.html" class="active">Idempotency &amp; checks</a>
+      <a href="variables.html">Variables &amp; formatting</a>
+      <a href="loops.html">Loops</a>
+    <a href="playbooks.html">Playbooks</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="inner">
+      <h1>Idempotency &amp; checks</h1>
+      <p class="lead">Rerunning a suite should be safe. A task's <code>idempotent</code> gate checks a predicate <em>before</em> the task runs, then decides whether to run the steps at all.</p>
+
+      <p>If a task <em>created</em> something the first time, the second run shouldn't create it again — nor fall over because it's already there. This is the "repeatability" half of htest's design, and it maps directly onto how CI prerequisites work: <em>"does this user already exist? if not, create it."</em> Get it right and a suite becomes a set of desired end-states you can apply as many times as you like.</p>
+
+      <h2>The gate</h2>
+      <p>The <code>idempotent</code> block hangs off a task and runs <strong>before</strong> the task's first step. It has three fields:</p>
+      <ul>
+        <li><strong><code>probe</code></strong> <em>(optional)</em> — steps that set up the page before the check.</li>
+        <li><strong><code>check</code></strong> <em>(required)</em> — the predicate that decides whether the resource is already in its target state.</li>
+        <li><strong><code>on_exists</code></strong> <em>(default <code>skip</code>)</em> — what to do when the predicate holds.</li>
+      </ul>
+      <p>At its simplest, just a <code>check</code>:</p>
+      <pre><code>- name: create_user
+  idempotent:
+    check: { selector: ".row-alice", exists: true }
+    on_exists: skip
+  steps:
+    - goto: "{{ BASE_URL }}/users/new"
+    - fill: { selector: "#name", value: "alice" }
+    - click: "#create"
+    - assert: { selector: ".row-alice", exists: true }</code></pre>
+      <p>Read it as: <em>"before creating alice, look for her row. If it's already there, skip the creation steps."</em> The first run creates her; every rerun is a no-op.</p>
+
+      <h2><code>check</code> — the predicate</h2>
+      <p><code>check</code> is a selector paired with an expected presence — it asks a single yes/no question: <em>is the resource already in the state I want?</em></p>
+      <table>
+        <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>selector</code></td><td>Any selector — plain CSS or the structured form (see <a href="selectors.html">Selectors</a>).</td></tr>
+          <tr><td><code>exists</code></td><td>Expected presence. <code>true</code> (default) = the element <strong>should</strong> be there for the predicate to hold; <code>false</code> = it should be <strong>absent</strong>.</td></tr>
+        </tbody>
+      </table>
+      <p>The gate compares what the selector resolves to against what you expected:</p>
+      <blockquote><strong>predicate holds</strong> when <code>actual presence == exists</code></blockquote>
+      <p>When the predicate holds, the resource is considered "already in the target state," and <code>on_exists</code> decides what happens. When it does <strong>not</strong> hold, the steps always run — the work still needs doing.</p>
+      <p>Just like <code>assert</code>, <code>check</code> <strong>polls</strong>: it re-checks presence every tick until it matches your expectation or the <code>--timeout</code> budget expires — so a probe's async filter or render settles before the gate decides, the same "you mostly don't wait" model as the rest of htest. And <code>check</code> never fails on its own — if the budget expires and the page still isn't in the expected state, that simply means "not in the target state, so do the work."</p>
+      <p>One cost is worth understanding. On the <strong>create path</strong> — <code>exists: true</code> with the resource genuinely absent — there is nothing on the page to find, so <code>check</code> polls the <strong>full</strong> budget before giving up and falling through to run the steps. It waits out the clock <em>every</em> time. Keep <code>--timeout</code> sane for suites that create many new resources, or gate the check behind a <code>probe</code> that ends the moment the list has loaded (see next), so the poll resolves on its first tick instead.</p>
+
+      <h2><code>probe</code> — search before you check</h2>
+      <p><code>check</code> only sees whatever the page currently shows. When answering <em>"does it exist?"</em> first requires some interaction — open the list, type a name into a filter, click search — those steps go in <code>probe</code>. They run <strong>before</strong> the predicate, using the ordinary <a href="actions.html">step</a> types (implicit waits included), so <code>check</code> then inspects the <em>searched</em> result rather than a raw, un-filtered snapshot.</p>
+      <pre><code>- name: create_user
+  idempotent:
+    probe:                                  # runs first, against the live page
+      - goto: "{{ BASE_URL }}/#Users_Customers"
+      - wait_for: "#Customers"
+      - fill:  { selector: "#Customers .filter input[name='UserName']", value: "{{ USERNAME }}" }
+      - click: "#Customers .filter button.filter-button"
+      - wait_for: { selector: "#Customers .grid", until: present }
+    check: { selector: { css: ".grid .row", contains: "{{ USERNAME }}" }, exists: true }
+    on_exists: skip
+  steps: [ ...create the user... ]</code></pre>
+      <p>This is the "search among many, then check the relevant one" pattern — a 1:1 map of a C# <code>CheckIfUserExists</code> that filters by name and then counts the matching rows. Three things to keep in mind:</p>
+      <ul>
+        <li><strong>Probe steps run on every invocation</strong> — the search <em>has</em> to happen to answer the question, including on reruns that end up skipping. Keep them <strong>read-only</strong>: navigate, filter, search. Never create or mutate anything in a probe, or you defeat the very idempotency it guards.</li>
+        <li><strong>End the probe on a load-complete signal, not on the row.</strong> <code>check</code> polls, so you rarely need an explicit wait — a filter that renders a little late still gets caught. But polling for the <em>row</em> means the create path (row genuinely absent) waits out the whole budget. To keep it snappy, end the probe with a <code>wait_for</code> on the list's <strong>load-complete</strong> signal — the moment the grid finishes rendering, present or empty (<code>bfs-data="done"</code>, a spinner clearing, and so on). Wait on <em>that</em>, never on the row itself: a row-present wait would hard-fail for a resource that legitimately doesn't exist yet.</li>
+        <li><strong>A probe failure fails the task.</strong> If the search itself broke, htest can't tell whether it's safe to skip, so it won't — it fails instead. The error names the offending step: <code>idempotency probe step 3/5 (click ...)</code>.</li>
+      </ul>
+
+      <h2><code>on_exists</code> — what to do when the predicate holds</h2>
+      <p>Once the predicate holds, <code>on_exists</code> chooses the outcome:</p>
+      <table>
+        <thead><tr><th>Value</th><th>Behaviour</th></tr></thead>
+        <tbody>
+          <tr><td><code>skip</code> <em>(default)</em></td><td>Skip the task's steps entirely. The task is reported as skipped, not failed. Safe reruns.</td></tr>
+          <tr><td><code>continue</code></td><td>Run the steps anyway. Use when the check is informational, or the steps are themselves idempotent.</td></tr>
+          <tr><td><code>fail</code></td><td>Treat prior existence as an error and fail the task. Use to assert a <em>clean</em> starting state.</td></tr>
+        </tbody>
+      </table>
+      <pre><code># Create-if-missing (the common case): skip when already present.
+idempotent:
+  check: { selector: ".row-alice", exists: true }
+  on_exists: skip
+
+# Guard a clean slate: fail if a leftover from a previous run is still there.
+idempotent:
+  check: { selector: ".row-alice", exists: true }
+  on_exists: fail</code></pre>
+
+      <h2>Patterns</h2>
+      <p>With those three fields understood, the common shapes fall out naturally.</p>
+
+      <h3>Create if missing</h3>
+      <p>The canonical use. Check for the thing you're about to create; skip if it's already there.</p>
+      <pre><code>- name: create_user
+  idempotent:
+    check: { selector: ".row-{{ USERNAME }}", exists: true }
+    on_exists: skip
+  steps:
+    - goto: "{{ BASE_URL }}/users/new"
+    - fill: { selector: "#name", value: "{{ USERNAME }}" }
+    - click: "#create"
+    - assert: { selector: ".row-{{ USERNAME }}", exists: true }</code></pre>
+
+      <h3>Delete if present</h3>
+      <p>Flip <code>exists</code>. The predicate now "holds" when the row is <strong>gone</strong> — so if it's still there, the delete steps run; if it's already gone, the task skips.</p>
+      <pre><code>- name: cleanup_user
+  idempotent:
+    check: { selector: ".row-{{ USERNAME }}", exists: false }   # want it absent
+    on_exists: skip
+  steps:
+    - click: { css: ".row-{{ USERNAME }}", find: { css: "button", text: "Delete" } }
+    - assert: { selector: ".row-{{ USERNAME }}", exists: false }</code></pre>
+
+      <h3>Detect a row by its content</h3>
+      <p>Generated ids and dynamic rows can't always be pinned down by a class. Use a structured selector so the check keys off rendered <strong>text</strong> instead of markup:</p>
+      <pre><code>idempotent:
+  check:
+    selector: { css: ".grid .row", contains: "{{ USERNAME }}" }
+    exists: true
+  on_exists: skip</code></pre>
+
+      <h2>Idempotency + <code>needs</code>: prerequisite chains</h2>
+      <p>Idempotent gates compose. Tasks declare prerequisites with <code>needs</code>; htest builds a run graph and executes in dependency order. Pair the two and you get exactly the "prerequisite" model of a CI framework: each prerequisite checks whether its resource exists and creates it only if missing, and later tasks depend on it.</p>
+      <pre><code>tasks:
+  - name: create_default_user
+    idempotent:
+      check: { selector: { css: ".grid .row", contains: "{{ USERNAME }}" }, exists: true }
+      on_exists: skip
+    steps: [ ... ]
+
+  - name: create_holding_account
+    needs: [create_default_user]        # only after the user exists
+    idempotent:
+      check: { selector: { css: "#Accounts .row", contains: "{{ ACCOUNT }}" }, exists: true }
+      on_exists: skip
+    steps: [ ... ]</code></pre>
+      <p>Run it a hundred times: the user and account are created once, and every subsequent run skips straight through — the "prerequisite" model of a CI framework, expressed as ordinary tasks.</p>
+
+      <h2>Limitations</h2>
+      <p>The predicate itself is still <strong>one selector, one presence test</strong>. What <code>probe</code> adds is the ability to <em>set up</em> the state to be checked (navigate, filter, search) beforehand, which covers the common "filter then count rows" case, but it doesn't turn the check into arbitrary logic. Two things follow from that:</p>
+      <ul>
+        <li><strong>Keep <code>probe</code> read-only.</strong> It runs on every invocation, including reruns that end up skipping; a probe that created or mutated data would defeat the gate.</li>
+        <li><strong>Mind the create-path cost.</strong> <code>check</code> polls, but the create path (row absent) polls the full budget. When results load asynchronously, end the probe with a <code>wait_for</code> on the list's load-complete signal so the check resolves on its first tick instead of waiting out the clock.</li>
+      </ul>
+
+      <h2><code>check</code> vs <code>assert</code></h2>
+      <p><code>check</code> and <code>assert</code> look almost identical — a selector and a presence — but they do opposite jobs at opposite ends of a task:</p>
+      <table>
+        <thead><tr><th></th><th><code>check</code> (gate)</th><th><code>assert</code> (step)</th></tr></thead>
+        <tbody>
+          <tr><td>When</td><td>Before steps, once</td><td>Wherever placed, in order</td></tr>
+          <tr><td>Waits?</td><td>Yes — polls until the budget expires</td><td>Yes — polls until the budget expires</td></tr>
+          <tr><td>On predicate false</td><td>Runs the steps</td><td>Fails the task</td></tr>
+          <tr><td>Purpose</td><td>Decide <em>whether</em> to act</td><td>Verify the page <em>did</em> what you expected</td></tr>
+        </tbody>
+      </table>
+      <p>Both poll the same way; the difference is what they do with the answer. <code>check</code> sits at the front of a task and decides <em>whether</em> to act — a false predicate means "do the work." <code>assert</code> sits wherever you place it and <em>proves</em> the work happened — a false predicate means the task failed. Use <code>check</code> to avoid redundant work; use <code>assert</code> to prove the work was done.</p>
+
+      <div class="pager">
+        <a href="screenshots.html">← Screenshots</a>
+        <a href="variables.html">Variables &amp; formatting →</a>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

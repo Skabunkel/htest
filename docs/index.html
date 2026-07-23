@@ -20,6 +20,8 @@
       <a href="selectors.html">Selectors</a>
       <a href="waits.html">Waits &amp; timing</a>
       <a href="screenshots.html">Screenshots</a>
+      <a href="idempotency.html">Idempotency &amp; checks</a>
+      <a href="variables.html">Variables &amp; formatting</a>
         <a href="loops.html">Loops</a>
     <a href="playbooks.html">Playbooks</a>
     </nav>
@@ -37,6 +39,8 @@
 
       <p>Two mantras drive the design: <strong>speed</strong> (eager page loads, batched DOM queries, implicit waits instead of fixed sleeps) and <strong>repeatability</strong> (idempotency gates, deterministic ordering, sessions always closed cleanly).</p>
 
+      <p>Here is a whole test, top to bottom — open a page, wait for it to render, assert it loaded, and capture proof. If it reads like plain steps, that's the point.</p>
+
       <pre><code># A whole test, top to bottom
 tasks:
   - name: homepage_loads
@@ -45,6 +49,9 @@ tasks:
       - wait_for: "h1"
       - assert: { selector: "h1", exists: true }
       - screenshot: "home.png"</code></pre>
+
+      <h2>The guide</h2>
+      <p>Each page is ordered additively — the concept first, then the basic case, then the advanced ones. Read top to bottom, or jump to what you need.</p>
 
       <div class="cards">
         <a class="card" href="getting-started.html">
@@ -71,6 +78,14 @@ tasks:
           <h3>Screenshots</h3>
           <p>Capture on purpose, or automatically on every failure.</p>
         </a>
+        <a class="card" href="idempotency.html">
+          <h3>Idempotency &amp; checks</h3>
+          <p>Make reruns safe: gate a task on a <code>check</code> predicate, then skip, continue, or fail.</p>
+        </a>
+        <a class="card" href="variables.html">
+          <h3>Variables &amp; formatting</h3>
+          <p>Where <code>{{ VAR }}</code> values come from, and how to reshape them — zero-pad, prefix, case, defaults.</p>
+        </a>
         <a class="card" href="loops.html">
           <h3>Loops</h3>
           <p>Repeat a task over a range or a list — five users, one task, expanded before the run.</p>
@@ -82,6 +97,7 @@ tasks:
       </div>
 
       <h2>What's in the box</h2>
+      <p>The capabilities the guide builds on, in one place:</p>
       <ul>
         <li><strong>YAML manifests</strong> — steps, prerequisites, idempotency, variables.</li>
         <li><strong>Run graph</strong> — topological order from <code>needs</code>; cycles rejected up front.</li>

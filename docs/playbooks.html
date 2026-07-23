@@ -20,6 +20,8 @@
       <a href="selectors.html">Selectors</a>
       <a href="waits.html">Waits &amp; timing</a>
       <a href="screenshots.html">Screenshots</a>
+      <a href="idempotency.html">Idempotency &amp; checks</a>
+      <a href="variables.html">Variables &amp; formatting</a>
         <a href="loops.html">Loops</a>
     <a href="playbooks.html" class="active">Playbooks</a>
     </nav>
@@ -28,12 +30,12 @@
   <main class="content">
     <div class="inner">
       <h1>Playbooks</h1>
-      <p class="lead">A manifest is a suite of tasks — the base unit you build on. A <em>playbook</em> collects several suites, sets run-wide settings once, and orders them. In CI you point at one file.</p>
+      <p class="lead">A manifest is a <em>suite</em> of tasks — the base unit you build on. A <strong>playbook</strong> is the layer above: it collects several suites into one run, sets the run-wide settings once, and orders the suites relative to each other. The payoff is a single entry point — CI (or you) points at one file and gets the whole test run, configured consistently:</p>
 
       <pre><code>htest playbook examples/ci.playbook.yaml</code></pre>
 
       <h2>Shape</h2>
-      <p>Two top-level keys: <code>settings</code> (optional) and <code>suites</code> (required).</p>
+      <p>A playbook has just two top-level keys: <code>settings</code> (optional) and <code>suites</code> (required). <code>settings</code> configures the whole run; <code>suites</code> lists the manifests to run and how they depend on each other.</p>
       <pre><code>settings:
   driver: webdriver
   browser: firefox
@@ -46,16 +48,17 @@ suites:
   - file: auth.yaml
   - file: reporting.yaml
     needs: [auth.yaml]     # all of auth.yaml before any of reporting.yaml</code></pre>
+      <p>The rest of the page walks down from here: first the <code>suites</code> list and how cross-file ordering works, then <code>settings</code> and where their values come from, and finally the two settings that most change how a CI run behaves — the managed driver and the wall-clock cap.</p>
 
       <h2>Suites &amp; file-level <code>needs</code></h2>
-      <p>Each entry under <code>suites</code> is a manifest <code>file</code> (path relative to the playbook's own directory). Its optional <code>needs</code> lists <em>other suite files</em> that must finish first.</p>
-      <p><code>needs</code> is <strong>file-level</strong>: every task in a needed suite becomes a prerequisite of every task in the dependent suite — "all of A before all of B". This is coarser than a manifest's per-task <code>needs</code> (<code>namespace:task</code>), and the two compose: task-level edges within files still hold, and the playbook adds the cross-file ones. Any cycle you create is caught before the run starts.</p>
+      <p>Each entry under <code>suites</code> names a manifest <code>file</code> (resolved relative to the playbook's <em>own</em> directory, not your working directory). Its optional <code>needs</code> lists <em>other suite files</em> that must finish before this one starts.</p>
+      <p>The important thing to understand is that this <code>needs</code> is <strong>file-level</strong>, coarser than the per-task <code>needs</code> inside a manifest. When suite B needs suite A, <em>every</em> task in A becomes a prerequisite of <em>every</em> task in B — "all of A before all of B". The two levels compose cleanly: the task-level edges <em>within</em> each file still hold exactly as written, and the playbook simply adds these cross-file edges on top. Any cycle you introduce across files is caught before the run starts.</p>
       <div class="callout">
-        A suite's namespace is its manifest's top-level <code>id:</code> (falling back to the file stem). Two suites with the same namespace is an error — give each a distinct <code>id:</code>.
+        A suite's namespace is its manifest's top-level <code>id:</code> (falling back to the file stem if there is no <code>id:</code>). This namespace is how tasks are reported and referenced, so two suites resolving to the <em>same</em> namespace is an error — give each a distinct <code>id:</code>.
       </div>
 
       <h2>Settings &amp; precedence</h2>
-      <p>Settings layer in one direction: <strong>CLI flag &gt; playbook <code>settings</code> &gt; built-in default</strong>. Any flag you pass to <code>htest playbook</code> overrides the same field in the file, so one playbook serves both local and CI runs.</p>
+      <p><code>settings</code> in the file is only one of three layers. They resolve in one direction — <strong>CLI flag &gt; playbook <code>settings</code> &gt; built-in default</strong> — so a value you pass on the command line always wins, and a field you set nowhere falls back to its default. That is what lets a single playbook serve both local and CI runs: keep the file configured for local work and override just the CI-specific fields at the command line.</p>
       <pre><code># Playbook says driver: mock; force a real headless Firefox for CI:
 htest playbook ci.playbook.yaml --driver webdriver --browser firefox --headless --shot-on-fail</code></pre>
 
@@ -81,20 +84,20 @@ htest playbook ci.playbook.yaml --driver webdriver --browser firefox --headless 
       </table>
 
       <h2>Managed driver</h2>
-      <p>Set <code>manage_driver: true</code> (with <code>driver: webdriver</code>) and htest starts the driver for you — <code>geckodriver</code> for Firefox, <code>chromedriver</code> for Chrome — waits for its port to accept connections, and kills it when the run ends. No separate "start the driver" step in your CI job.</p>
+      <p>By default you are responsible for having a WebDriver running before htest connects. Setting <code>manage_driver: true</code> (with <code>driver: webdriver</code>) hands that job to htest instead: it starts the right driver for your browser — <code>geckodriver</code> for Firefox, <code>chromedriver</code> for Chrome — waits for its port to accept connections, and kills it when the run ends. That removes the separate "start the driver" step from your CI job.</p>
       <pre><code>settings:
   driver: webdriver
   browser: firefox
   manage_driver: true
   driver_port: 4444           # optional; default 4444
   driver_path: geckodriver    # optional; else found on PATH</code></pre>
-      <p>The session is always closed before the driver process is killed, so no browser is left orphaned between runs.</p>
+      <p>Shutdown is ordered carefully: the browser session is always closed <em>before</em> the driver process is killed, so a run never leaves an orphaned browser behind between invocations.</p>
 
       <h2>Failing the whole run on time</h2>
-      <p><code>max_run_time</code> is a global wall-clock budget in seconds, checked between tasks. If the run exceeds it, every remaining task is marked failed with a "run aborted" reason — so a hung suite can't stall a CI job indefinitely.</p>
+      <p>A hung page or a driver that stops responding could otherwise stall a CI job indefinitely. <code>max_run_time</code> is the guard: a global wall-clock budget in seconds, checked <em>between</em> tasks. Once the elapsed time exceeds it, every remaining task is marked failed with a "run aborted" reason rather than being attempted — so the run always terminates and reports.</p>
 
       <h2>Exit code</h2>
-      <p>Like <code>htest run</code>, the process exits non-zero if any task failed — the single signal a CI pipeline needs.</p>
+      <p>Finally, the signal CI actually consumes. Like <code>htest run</code>, the <code>htest playbook</code> process exits non-zero if any task failed — one bit that tells the pipeline whether to go green or red.</p>
 
       <div class="pager">
         <a href="loops.html">← Loops</a>

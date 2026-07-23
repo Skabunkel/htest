@@ -46,6 +46,15 @@ pub fn resolve_goto(raw: &str, base_dir: &Path) -> String {
     // (`file:///srv/x`, `file:///C:/x`) passes through, relative
     // (`file://./demo`, `file://demo`, `file://../demo`) gets anchored.
     if let Some(rest) = strip_file_scheme(t) {
+        // An already-absolute path inside the URL (`file:///srv/x`,
+        // `file:///C:/x`) is not ours to anchor — reformat its slashes/encoding
+        // so it round-trips identically on every platform. Note `Path::is_absolute`
+        // is OS-specific (a unix `/srv/x` is *not* absolute on Windows), so this
+        // is decided textually rather than via `resolve_path`. Only a relative
+        // form (`file://./x`, `file://x`) is anchored.
+        if is_absolute_urlpath(rest) {
+            return to_file_url(Path::new(rest));
+        }
         return match resolve_path(rest, base_dir) {
             Some(abs) => to_file_url(&abs),
             None => t.to_string(),
@@ -153,6 +162,13 @@ fn is_path_shaped(s: &str) -> bool {
         || is_windows_absolute(Path::new(s))
 }
 
+/// True if a path lifted out of a `file://` URL is already absolute — a unix
+/// root (`/srv/x`), a slashed drive (`/C:/x`, which starts with `/`), or a bare
+/// drive (`C:/x`). Such a path is passed through unanchored.
+fn is_absolute_urlpath(rest: &str) -> bool {
+    rest.starts_with('/') || is_windows_absolute(Path::new(rest))
+}
+
 /// `C:\x` / `C:/x` — absolute on Windows, but not `Path::is_absolute` on unix.
 fn is_windows_absolute(p: &Path) -> bool {
     let s = p.to_string_lossy();
@@ -239,10 +255,12 @@ mod tests {
     }
 
     /// Cargo runs tests with the CWD at the crate root, so relative expectations
-    /// are built from it.
+    /// are built from it. Routed through the real `to_file_url`/`normalize` so
+    /// the expected string matches production byte-for-byte on every platform
+    /// (forward slashes, leading `/` before a drive letter, percent-encoding) —
+    /// `rel` is a *native* relative path, not a pre-encoded URL fragment.
     fn cwd_url(rel: &str) -> String {
-        let p = std::env::current_dir().unwrap().join(rel);
-        format!("file://{}", p.to_string_lossy())
+        to_file_url(&normalize(&std::env::current_dir().unwrap().join(rel)))
     }
 
     #[test]
@@ -305,11 +323,7 @@ mod tests {
         );
         assert_eq!(
             resolve_goto("../pages/a.html", &base()),
-            format!(
-                "file://{}",
-                normalize(&std::env::current_dir().unwrap().join("../pages/a.html"))
-                    .to_string_lossy()
-            )
+            cwd_url("../pages/a.html")
         );
     }
 
@@ -338,7 +352,7 @@ mod tests {
     fn spaces_and_specials_are_percent_encoded() {
         assert_eq!(
             resolve_goto("./my pages/a&b.html", &base()),
-            cwd_url("my%20pages/a%26b.html")
+            cwd_url("my pages/a&b.html")
         );
     }
 

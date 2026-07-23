@@ -15,8 +15,8 @@ pub enum HtError {
     #[error("task `{0}` needs unknown task `{1}`")]
     UnknownDep(String, String),
 
-    #[error("assertion failed in task `{task}`: {detail}")]
-    Assertion { task: String, detail: String },
+    #[error("{0}")]
+    Assertion(String),
 
     #[error("browser error: {0}")]
     #[allow(dead_code)]

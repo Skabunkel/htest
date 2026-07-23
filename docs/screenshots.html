@@ -20,6 +20,8 @@
       <a href="selectors.html">Selectors</a>
       <a href="waits.html">Waits &amp; timing</a>
       <a href="screenshots.html" class="active">Screenshots</a>
+      <a href="idempotency.html">Idempotency &amp; checks</a>
+      <a href="variables.html">Variables &amp; formatting</a>
         <a href="loops.html">Loops</a>
     <a href="playbooks.html">Playbooks</a>
     </nav>
@@ -28,41 +30,50 @@
   <main class="content">
     <div class="inner">
       <h1>Screenshots</h1>
-      <p class="lead">Capture the viewport on purpose with a step, or automatically whenever a task fails.</p>
+      <p class="lead">A screenshot is a PNG of the browser viewport written to disk. Capture one on purpose with a step, or automatically whenever a task fails.</p>
+
+      <p>htest gives you two ways to capture the viewport: a step you place deliberately to document a state you care about, and a flag that fires automatically whenever a task fails. Both write into the same directory, and you'll usually want them together. This page builds up from the simple, deliberate case to a full CI invocation.</p>
 
       <h2>On purpose — the <code>screenshot</code> step</h2>
-      <p>Add a <code>screenshot</code> step wherever you want a snapshot. The value is a filename; it's written into the screenshots directory.</p>
+      <p>The <code>screenshot</code> step captures the viewport at exactly the point in a task where you place it. Its value is a filename, and htest writes the PNG under the screenshots directory:</p>
       <pre><code>- goto: "{{ BASE_URL }}"
 - wait_for: "h1"
 - screenshot: "home.png"</code></pre>
-      <p>The output directory is <code>screenshots/</code> by default; change it with <code>--screenshots</code>:</p>
+      <p>Because it's an ordinary step, it fires in sequence with everything around it — here, only after <code>wait_for: "h1"</code> confirms the page has rendered, so the image captures the settled page rather than a half-drawn one. Use it to document key states in a passing run: a filled-in form before submit, a dashboard after login, a report once it loads.</p>
+
+      <h2>The output directory</h2>
+      <p>Every screenshot — deliberate or automatic — lands in one directory, so it's worth setting deliberately. It defaults to <code>screenshots/</code>; change it with <code>--screenshots</code>:</p>
       <pre><code>htest run smoke.yaml --driver webdriver --screenshots artifacts/shots</code></pre>
-      <p>The directory is created if it doesn't exist. Subdirectories in the name work too (e.g. <code>screenshot: "login/step2.png"</code>).</p>
+      <p>Two conveniences make this painless in practice:</p>
+      <ul>
+        <li>The directory is <strong>created if it doesn't exist</strong>, so you never have to pre-make it in a fresh checkout or CI workspace.</li>
+        <li><strong>Subdirectories in the filename work</strong>, so you can organize shots by flow. <code>screenshot: "login/step2.png"</code> writes <code>login/step2.png</code> beneath the screenshots directory, creating the <code>login/</code> folder as needed.</li>
+      </ul>
 
       <h2>On failure — <code>--shot-on-fail</code></h2>
-      <p>Pass <code>--shot-on-fail</code> and htest captures a screenshot the moment any task fails — no <code>screenshot</code> step required. Perfect for CI, where you want to see the page state at the point of failure.</p>
+      <p>The screenshot you most want is the one you didn't think to ask for: the page as it looked at the moment something broke. Pass <code>--shot-on-fail</code> and htest captures exactly that — automatically, the moment <strong>any</strong> task fails, with no <code>screenshot</code> step required:</p>
       <pre><code>htest run suite.yaml --driver webdriver --shot-on-fail</code></pre>
-      <p>Each failed task produces one file named <code>FAIL-&lt;task-id&gt;.png</code> in the screenshots directory. The task's canonical id (<code>namespace:name</code>) is used, with <code>:</code> replaced by <code>-</code> so it's a valid filename:</p>
+      <p>Each failed task produces one file named <code>FAIL-&lt;task-id&gt;.png</code> in the screenshots directory. The name is derived from the task's canonical id <code>namespace:name</code>, with the <code>:</code> replaced by <code>-</code> so it's a valid filename — task <code>app:login</code> becomes <code>FAIL-app-login.png</code>:</p>
       <pre><code>screenshots/
   FAIL-app-login.png          # from task  app:login
   FAIL-reporting-audit.png    # from task  reporting:audit</code></pre>
 
-      <div class="callout">
-        <strong>Combine both.</strong> Use explicit <code>screenshot</code> steps to document key states in a passing run, and <code>--shot-on-fail</code> as a safety net so a failure always leaves visual evidence. They write to the same directory and don't collide (<code>FAIL-</code> prefix).
-      </div>
+      <h2>Combine both</h2>
+      <p>The two mechanisms are complementary, not competing, and they coexist cleanly. Use deliberate <code>screenshot</code> steps to document the states you expect in a passing run, and keep <code>--shot-on-fail</code> switched on as a safety net so a failure always leaves visual evidence behind. They share one directory and never collide, because the automatic captures all carry the <code>FAIL-</code> prefix while your deliberate names don't.</p>
 
       <h2>A CI-friendly invocation</h2>
+      <p>Put it together for continuous integration, where you're running headless and want a complete picture from a single run:</p>
       <pre><code>htest run suite.yaml \
   --driver webdriver --browser firefox --headless \
   --window 1280x800 \
   --screenshots artifacts \
   --shot-on-fail \
   --keep-going          # run every task; collect all failures + shots</code></pre>
-      <p>With <code>--keep-going</code>, htest doesn't stop at the first failure, so one run surfaces every failing task (and, with <code>--shot-on-fail</code>, a screenshot for each).</p>
+      <p>The pieces working together: <code>--headless</code> with a fixed <code>--window 1280x800</code> gives reproducible framing on a machine with no display; <code>--screenshots artifacts</code> drops everything into a directory your CI can archive; and <code>--keep-going</code> is what makes a single run worth archiving — instead of stopping at the first failure, htest runs <em>every</em> task, so one run surfaces every failing task and, with <code>--shot-on-fail</code>, a screenshot for each.</p>
 
       <div class="pager">
         <a href="waits.html">← Waits &amp; timing</a>
-        <a href="loops.html">Loops →</a>
+        <a href="idempotency.html">Idempotency &amp; checks →</a>
       </div>
     </div>
   </main>

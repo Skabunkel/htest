@@ -14,6 +14,7 @@ use crate::manifest::{
     AssertArgs, Check, Idempotent, OnExists, Step, Task, Until, UploadArgs, WaitForArgs,
 };
 use crate::plan::PlannedTask;
+use anyhow::Context;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -164,7 +165,10 @@ impl<'a> Engine<'a> {
                         name: id.clone(),
                         status: Status::Failed,
                         duration,
-                        detail: Some(e.to_string()),
+                        // `{:#}` prints the whole anyhow chain (`step 3/6
+                        // (click …): selector matched no elements: …`), not just
+                        // the outermost context, so the report pinpoints the step.
+                        detail: Some(format!("{e:#}")),
                     }
                 }
             };
@@ -185,20 +189,48 @@ impl<'a> Engine<'a> {
     /// Returns Ok(Some(())) on run, Ok(None) on idempotent skip, Err on failure.
     fn run_task(&mut self, task: &Task) -> Result<Option<()>> {
         if let Some(idem) = &task.idempotent {
-            if self.gate_skips(task, idem)? {
+            if self.gate_skips(idem)? {
                 return Ok(None);
             }
         }
-        for step in &task.steps {
-            self.run_step(task, step)?;
+        let total = task.steps.len();
+        for (i, step) in task.steps.iter().enumerate() {
+            // Localize any failure to the exact step: which action, which
+            // position. The task id is already the report row, so it isn't
+            // repeated here.
+            self.run_step(step)
+                .with_context(|| format!("step {}/{total} ({})", i + 1, step.describe()))?;
         }
         Ok(Some(()))
     }
 
     /// Evaluate the idempotency gate. Returns true if the task should be skipped.
-    fn gate_skips(&mut self, task: &Task, idem: &Idempotent) -> Result<bool> {
+    fn gate_skips(&mut self, idem: &Idempotent) -> Result<bool> {
+        // Probe steps run first so the check can inspect a searched/filtered
+        // page (type a username into a filter, click search, *then* look for the
+        // row). A probe failure fails the whole gate — the existence question
+        // couldn't be answered, so we can't safely skip.
+        let total = idem.probe.len();
+        for (i, step) in idem.probe.iter().enumerate() {
+            self.run_step(step).with_context(|| {
+                format!("idempotency probe step {}/{total} ({})", i + 1, step.describe())
+            })?;
+        }
+
         let Check { selector, exists } = &idem.check;
-        let actual = self.browser.exists(selector)?;
+        // Poll until the presence matches expectation or the wait budget
+        // expires — same implicit-wait model as `assert`, so a probe's async
+        // filter/render settles before we decide. The one cost: the "create"
+        // path (`exists: true`, resource genuinely absent) waits the full
+        // budget before falling through to run the steps.
+        let deadline = Instant::now() + self.cfg.wait_timeout;
+        let actual = loop {
+            let a = self.browser.exists(selector)?;
+            if a == *exists || Instant::now() >= deadline {
+                break a;
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        };
         let satisfied = actual == *exists; // predicate holds -> "already exists"
         if !satisfied {
             return Ok(false); // resource not in expected state -> do the work
@@ -206,12 +238,9 @@ impl<'a> Engine<'a> {
         match idem.on_exists {
             OnExists::Skip => Ok(true),
             OnExists::Continue => Ok(false),
-            OnExists::Fail => Err(HtError::Assertion {
-                task: task.name.clone(),
-                detail: format!(
-                    "idempotency gate on_exists=fail: `{selector}` already satisfied"
-                ),
-            }
+            OnExists::Fail => Err(HtError::Assertion(format!(
+                "idempotency gate on_exists=fail: `{selector}` already satisfied"
+            ))
             .into()),
         }
     }
@@ -233,7 +262,7 @@ impl<'a> Engine<'a> {
         }
     }
 
-    fn run_step(&mut self, task: &Task, step: &Step) -> Result<()> {
+    fn run_step(&mut self, step: &Step) -> Result<()> {
         match step {
             Step::Goto(url) => self.browser.goto(url),
             Step::Click(sel) => {
@@ -249,12 +278,12 @@ impl<'a> Engine<'a> {
                 std::thread::sleep(Duration::from_millis(*ms));
                 Ok(())
             }
-            Step::WaitFor(w) => self.run_wait_for(task, w),
+            Step::WaitFor(w) => self.run_wait_for(w),
             Step::Screenshot(name) => {
                 let path = self.cfg.screenshot_dir.join(name);
                 self.browser.screenshot(&path)
             }
-            Step::Assert(a) => self.run_assert(task, a),
+            Step::Assert(a) => self.run_assert(a),
         }
     }
 
@@ -277,7 +306,7 @@ impl<'a> Engine<'a> {
     /// Explicit `wait_for`: block until the selector reaches the wanted state
     /// or the (optionally overridden) timeout elapses. Unlike the implicit
     /// pre-action wait, a timeout here is a hard failure — that's the point.
-    fn run_wait_for(&mut self, task: &Task, w: &WaitForArgs) -> Result<()> {
+    fn run_wait_for(&mut self, w: &WaitForArgs) -> Result<()> {
         let want_present = matches!(w.until, Until::Present);
         let budget = w
             .timeout_ms
@@ -290,22 +319,19 @@ impl<'a> Engine<'a> {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err(HtError::Assertion {
-                    task: task.name.clone(),
-                    detail: format!(
-                        "wait_for `{}` until {:?} timed out after {} ms (present={present})",
-                        w.selector,
-                        w.until,
-                        budget.as_millis()
-                    ),
-                }
+                return Err(HtError::Assertion(format!(
+                    "wait_for `{}` until {:?} timed out after {} ms (present={present})",
+                    w.selector,
+                    w.until,
+                    budget.as_millis()
+                ))
                 .into());
             }
             std::thread::sleep(POLL_INTERVAL);
         }
     }
 
-    fn run_assert(&mut self, task: &Task, a: &AssertArgs) -> Result<()> {
+    fn run_assert(&mut self, a: &AssertArgs) -> Result<()> {
         // Poll until the presence matches expectation (element appears for
         // exists=true, or disappears for exists=false) or the budget expires.
         let deadline = Instant::now() + self.cfg.wait_timeout;
@@ -317,13 +343,10 @@ impl<'a> Engine<'a> {
             std::thread::sleep(POLL_INTERVAL);
         };
         if present != a.exists {
-            return Err(HtError::Assertion {
-                task: task.name.clone(),
-                detail: format!(
-                    "expected `{}` exists={}, was {}",
-                    a.selector, a.exists, present
-                ),
-            }
+            return Err(HtError::Assertion(format!(
+                "expected `{}` exists={}, was {}",
+                a.selector, a.exists, present
+            ))
             .into());
         }
         if let Some(expected) = &a.text {
@@ -337,16 +360,136 @@ impl<'a> Engine<'a> {
                 std::thread::sleep(POLL_INTERVAL);
             };
             if &actual != expected {
-                return Err(HtError::Assertion {
-                    task: task.name.clone(),
-                    detail: format!(
-                        "text of `{}`: expected {expected:?}, was {actual:?}",
-                        a.selector
-                    ),
-                }
+                return Err(HtError::Assertion(format!(
+                    "text of `{}`: expected {expected:?}, was {actual:?}",
+                    a.selector
+                ))
                 .into());
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::browser::mock::MockBrowser;
+    use crate::manifest::Check;
+    use crate::selector::Selector;
+    use std::path::Path;
+
+    fn engine(browser: &mut MockBrowser) -> Engine<'_> {
+        Engine::new(
+            browser,
+            EngineConfig {
+                screenshot_dir: PathBuf::from("."),
+                screenshot_on_fail: false,
+                keep_going: false,
+                wait_timeout: Duration::ZERO,
+                max_run_time: None,
+            },
+        )
+    }
+
+    fn row(user: &str) -> Selector {
+        Selector {
+            css: Some(".grid .row".into()),
+            contains: Some(user.into()),
+            ..Default::default()
+        }
+    }
+
+    /// The probe runs *before* the check: here the probe interacts with the very
+    /// row the check looks for, flipping it into existence in the mock world. If
+    /// the check ran first (or the probe were ignored) the gate would not skip.
+    #[test]
+    fn probe_runs_before_check() {
+        // Seed the row absent -> "user not found" until the probe touches it.
+        let mut b = MockBrowser::with_absent([".grid .row:contains(alice)".to_string()]);
+
+        let idem = Idempotent {
+            probe: vec![Step::Click(row("alice"))], // mock: click makes it present
+            check: Check {
+                selector: row("alice"),
+                exists: true,
+            },
+            on_exists: OnExists::Skip,
+        };
+        assert!(engine(&mut b).gate_skips(&idem).unwrap());
+    }
+
+    /// A probe that searches for a *different* user leaves the wanted row absent,
+    /// so the check fails to hold and the gate does the work (no skip).
+    #[test]
+    fn probe_that_does_not_find_the_row_does_not_skip() {
+        let mut b = MockBrowser::with_absent([".grid .row:contains(bob)".to_string()]);
+
+        let idem = Idempotent {
+            probe: vec![Step::Click(Selector::css("#filter button"))], // unrelated
+            check: Check {
+                selector: row("bob"),
+                exists: true,
+            },
+            on_exists: OnExists::Skip,
+        };
+        assert!(!engine(&mut b).gate_skips(&idem).unwrap());
+    }
+
+    /// The check polls (like `assert`): a row that renders a beat late — absent
+    /// on the first read, present on the next — is still caught, so the gate
+    /// skips rather than redundantly re-creating.
+    #[test]
+    fn check_polls_until_the_row_appears() {
+        // Absent on read #1, present on read #2+ (models an async filter render).
+        struct LateRow {
+            reads: usize,
+        }
+        impl Browser for LateRow {
+            fn goto(&mut self, _: &str) -> Result<()> {
+                Ok(())
+            }
+            fn exists(&mut self, _: &Selector) -> Result<bool> {
+                self.reads += 1;
+                Ok(self.reads >= 2)
+            }
+            fn click(&mut self, _: &Selector) -> Result<()> {
+                Ok(())
+            }
+            fn fill(&mut self, _: &Selector, _: &str) -> Result<()> {
+                Ok(())
+            }
+            fn text(&mut self, _: &Selector) -> Result<String> {
+                Ok(String::new())
+            }
+            fn screenshot(&mut self, _: &Path) -> Result<()> {
+                Ok(())
+            }
+            fn name(&self) -> &'static str {
+                "late-row"
+            }
+        }
+
+        let mut b = LateRow { reads: 0 };
+        // A budget long enough to poll at least once more after the first miss.
+        let mut eng = Engine::new(
+            &mut b,
+            EngineConfig {
+                screenshot_dir: PathBuf::from("."),
+                screenshot_on_fail: false,
+                keep_going: false,
+                wait_timeout: Duration::from_secs(2),
+                max_run_time: None,
+            },
+        );
+        let idem = Idempotent {
+            probe: vec![],
+            check: Check {
+                selector: row("alice"),
+                exists: true,
+            },
+            on_exists: OnExists::Skip,
+        };
+        assert!(eng.gate_skips(&idem).unwrap());
     }
 }
